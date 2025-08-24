@@ -151,6 +151,70 @@ local function collectPets()
     table.sort(inv,    function(a,b) return a:lower() < b:lower() end)
     return placed, inv
 end
+-- แปลง counter -> รายการบรรทัด และเรียงชื่อ
+local function counterToLines(counter)
+    local items = {}
+    for key, n in pairs(counter) do
+        table.insert(items, string.format("%s — x%d", key, n))
+    end
+    table.sort(items, function(a,b) return a:lower() < b:lower() end)
+    return items
+end
+
+-- นับจำนวนสัตว์แยกเป็น 2 กลุ่ม: วางอยู่ / อยู่ในคลัง
+local function collectPetCountsSplit()
+    local placedCounter   = {}  -- ["Panther | Dino"] = #
+    local inventoryCounter= {}
+
+    -- ทำแผนที่ UID -> model ของสัตว์ที่ "วางอยู่"
+    local modelsByUID = {}
+    local petsFolder = workspace:FindFirstChild("Pets")
+    if petsFolder then
+        for _, model in ipairs(petsFolder:GetChildren()) do
+            if model:GetAttribute("UserId") == Player.UserId then
+                modelsByUID[tostring(model)] = model
+            end
+        end
+    end
+
+    -- เดิน Data.Pets ทั้งหมด แล้วจัดเข้ากลุ่มตามว่ามี model อยู่ในโลกหรือไม่
+    if OwnedPetData then
+        for _, node in ipairs(OwnedPetData:GetChildren()) do
+            local t = getAttrOrChildValue(node, "T") or "Unknown"
+            local m = getAttrOrChildValue(node, "M") or "None"
+            local key = string.format("%s | %s", tostring(t), tostring(m))
+
+            if modelsByUID[node.Name] then
+                placedCounter[key] = (placedCounter[key] or 0) + 1
+            else
+                inventoryCounter[key] = (inventoryCounter[key] or 0) + 1
+            end
+        end
+    end
+
+    return counterToLines(placedCounter), counterToLines(inventoryCounter)
+end
+
+-- นับจำนวนสัตว์ตามคู่ (Type | Mutate)
+local function collectPetCounts()
+    local counter = {}   -- counter["Panther | Dino"] = 3
+    if OwnedPetData then
+        for _, node in ipairs(OwnedPetData:GetChildren()) do
+            local t = getAttrOrChildValue(node, "T") or "Unknown"
+            local m = getAttrOrChildValue(node, "M") or "None"
+            local key = string.format("%s | %s", tostring(t), tostring(m))
+            counter[key] = (counter[key] or 0) + 1
+        end
+    end
+
+    -- แปลงเป็นบรรทัดข้อความ และเรียงให้อ่านง่าย
+    local items = {}
+    for key, n in pairs(counter) do
+        table.insert(items, string.format("%s — x%d", key, n))
+    end
+    table.sort(items, function(a,b) return a:lower() < b:lower() end)
+    return items
+end
 
 
 
@@ -194,6 +258,7 @@ local function sendAll()
     local placed, inv = collectPets()
     local eggs  = collectEggs()
     local foods = collectFoods()
+    local placedCounts, invCounts = collectPetCountsSplit()  -- << เพิ่ม
 
     local function sendLong(prefix, linesTable)
         local body = (#linesTable > 0) and table.concat(linesTable, "\n") or "ไม่มี"
@@ -209,8 +274,7 @@ local function sendAll()
                     SendMessage(table.concat(acc))
                     acc, len = {line}, #line
                 else
-                    table.insert(acc, piece)
-                    len = len + #piece
+                    table.insert(acc, piece); len = len + #piece
                 end
             end
             if #acc > 0 then SendMessage(table.concat(acc)) end
@@ -219,9 +283,16 @@ local function sendAll()
 
     sendLong("🐾 **Pets (Placed: Type | Mutate | ProduceSpeed)**", placed)
     sendLong("📦 **Pets (Inventory: Type | Mutate | ProduceSpeed)**", inv)
+
+    -- << ใหม่: สรุปจำนวนแบบแยก
+    sendLong("🔢 **Pet Counts — Placed (Type | Mutate)**",   placedCounts)
+    sendLong("🔢 **Pet Counts — Inventory (Type | Mutate)**", invCounts)
+
     sendLong("🥚 **Eggs (Type | Mutate)**", eggs)
     sendLong("🍖 **Foods**", foods)
 end
+
+
 
 
 -- เรียกครั้งเดียว
