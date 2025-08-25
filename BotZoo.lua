@@ -573,7 +573,7 @@ if game.PlaceId == 105555311806207 then
                                     end
                                 elseif GiftType == "Match Pet" then
                                     for _,PetData in pairs(OwnedPetData:GetChildren()) do
-                                        if PetData and not PetData.IsBig and Configuration.Players.Pet_Type[PetData.Type] then
+                                        if PetData and Configuration.Players.Pet_Type[PetData.Type] then
                                             CharacterRE:FireServer("Focus",PetData.Name)
                                             task.wait(0.75)
                                             GiftRE:FireServer(GiftPlayer)
