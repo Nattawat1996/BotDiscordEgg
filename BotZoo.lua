@@ -637,7 +637,7 @@ if game.PlaceId == 105555311806207 then
             Title = "Select Pet Type",
             Description = "Select Pet Type",
             Values = Pets_InGame,
-            Multi = false,
+            Multi = true,
             Default = {},
             Callback = function(Value)
                 Configuration.Players.Pet_Type = Value
