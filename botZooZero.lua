@@ -1,7 +1,17 @@
 -- Build A Zoo: Auto Buy Egg using WindUI
 
 -- Load WindUI library (same as in Windui.lua)
-local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+local WINDUI_URL = "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/main.lua"
+
+local okGet, srcOrErr = pcall(function()
+    return game:HttpGet(WINDUI_URL)
+end)
+assert(okGet and type(srcOrErr)=="string" and #srcOrErr>0, "HttpGet WindUI failed: "..tostring(srcOrErr))
+
+local chunk, lerr = loadstring(srcOrErr)
+assert(chunk, "WindUI compile failed: "..tostring(lerr))
+
+local WindUI = chunk()  -- ปลอดภัยแล้ว
 
 -- Services
 local Players = game:GetService("Players")
@@ -2958,7 +2968,7 @@ local autoPlacePetToggle = Tabs.PlacePetTab:Toggle({
             -- Reset counters
             
             autoPlaceThread = task.spawn(function()
-                runAutoPlace()
+                runAutoPlacePets()
                 autoPlaceThread = nil
             end)
             WindUI:Notify({ Title = "🏠 Auto Place", Content = "Started - Placing Eggs automatically! 🎉", Duration = 3 })
