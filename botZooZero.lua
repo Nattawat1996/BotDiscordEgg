@@ -11,7 +11,11 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local vector = { create = function(x, y, z) return Vector3.new(x, y, z) end }
 local LocalPlayer = Players.LocalPlayer
-
+local Eggs_InGame = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
+local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
+local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
+local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
+local InGameConfig = ReplicatedStorage:WaitForChild("Config")
 -- Selection state variables
 local selectedTypeSet = {}
 local selectedMutationSet = {}
@@ -1917,8 +1921,7 @@ end
 local placeEggDropdown = Tabs.PlaceTab:Dropdown({
     Title = "🥚 Pick Pet Types",
     Desc = "Choose which pets to place",
-    Values = {"BasicEgg", "RareEgg", "SuperRareEgg", "EpicEgg", "LegendEgg", "PrismaticEgg", "HyperEgg", "VoidEgg", "BowserEgg", "DemonEgg", "BoneDragonEgg", "UltraEgg", "DinoEgg", "FlyEgg", "UnicornEgg", "AncientEgg"},
-    Value = {},
+    Values = Pets_InGame,
     Multi = true,
     AllowNone = true,
     Callback = function(selection)
@@ -1930,8 +1933,7 @@ local placeEggDropdown = Tabs.PlaceTab:Dropdown({
 local placeMutationDropdown = Tabs.PlaceTab:Dropdown({
     Title = "🧬 Pick Mutations",
     Desc = "Choose which mutations to place (leave empty for all mutations)",
-    Values = {"Golden", "Diamond", "Electric", "Fire", "Jurassic"},
-    Value = {},
+    Values = Mutations_InGame,
     Multi = true,
     AllowNone = true,
     Callback = function(selection)
