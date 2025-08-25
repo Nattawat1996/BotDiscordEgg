@@ -1,6 +1,3 @@
-แนบสคริปต์ฉบับ “แก้ไขแล้วทั้งหมด” ให้เลยครับ (เพิ่มเมนูและลอจิกการส่ง Pet แบบระบุ Type/Mutation ในแท็บ Players ตามที่ขอ) — นำไปแทนที่ทั้งไฟล์ได้ทันที
-
-```lua
 if game.PlaceId == 105555311806207 then
     if MeowyBuildAZoo then
         MeowyBuildAZoo:Destroy()
