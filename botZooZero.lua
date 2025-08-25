@@ -11,12 +11,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local vector = { create = function(x, y, z) return Vector3.new(x, y, z) end }
 local LocalPlayer = Players.LocalPlayer
-local InGameConfig = ReplicatedStorage:WaitForChild("Config")
-local Eggs_InGame = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
-local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
-local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
-local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
-local InGameConfig = ReplicatedStorage:WaitForChild("Config")
+
 -- Selection state variables
 local selectedTypeSet = {}
 local selectedMutationSet = {}
@@ -50,7 +45,7 @@ local Window = WindUI:CreateWindow({
 local Tabs = {}
 Tabs.MainSection = Window:Section({ Title = "🤖 Auto Helpers", Opened = true })
 Tabs.AutoTab = Tabs.MainSection:Tab({ Title = "🥚 | Buy Eggs"})
-Tabs.PlaceTab = Tabs.MainSection:Tab({ Title = "🏠 | Place Pets"})
+Tabs.PlaceTab = Tabs.MainSection:Tab({ Title = "🏠 | Place Eggs"})
 Tabs.HatchTab = Tabs.MainSection:Tab({ Title = "⚡ | Hatch Eggs"})
 Tabs.ClaimTab = Tabs.MainSection:Tab({ Title = "💰 | Get Money"})
 Tabs.ShopTab = Tabs.MainSection:Tab({ Title = "🛒 | Shop"})
@@ -1042,7 +1037,7 @@ end
 local function getEggContainer()
     local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
     local data = pg and pg:FindFirstChild("Data")
-    return data and data:FindFirstChild("Pets") or nil
+    return data and data:FindFirstChild("Egg") or nil
 end
 
 -- Function to read mutation from egg configuration
@@ -1922,7 +1917,7 @@ end
 local placeEggDropdown = Tabs.PlaceTab:Dropdown({
     Title = "🥚 Pick Pet Types",
     Desc = "Choose which pets to place",
-    Values = Pets_InGame,
+    Values = {"BasicEgg", "RareEgg", "SuperRareEgg", "EpicEgg", "LegendEgg", "PrismaticEgg", "HyperEgg", "VoidEgg", "BowserEgg", "DemonEgg", "BoneDragonEgg", "UltraEgg", "DinoEgg", "FlyEgg", "UnicornEgg", "AncientEgg"},
     Value = {},
     Multi = true,
     AllowNone = true,
