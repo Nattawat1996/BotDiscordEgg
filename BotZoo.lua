@@ -207,10 +207,9 @@ if game.PlaceId == 105555311806207 then
         Players = {
             SelectPlayer = "",
             SelectType = "",
-            -- ▼▼ เพิ่มใหม่ ▼▼
-            GiftPet_FilterType = "All",        -- "All" | "Match Pet" | "Match Mutation" | "Match Pet&Mutation"
-            GiftPet_Pets = {},                 -- เลือกประเภทสัตว์
-            GiftPet_Mutations = {},            -- เลือกมิวเทชัน
+            SendPet_Type = "All",
+            Pet_Type = {},
+            Pet_Mutations = {},
         },
         Event = {
             AutoClaim = false,
@@ -563,45 +562,25 @@ if game.PlaceId == 105555311806207 then
                                 local GiftPlayer = Players:FindFirstChild(Configuration.Players.SelectPlayer)
                                 if not GiftPlayer then return end
                                 Configuration.Waiting = true
-                                if GiftType == "Pets" then
-                                    local filterType = Configuration.Players.GiftPet_FilterType
-                                    local wantPets = Configuration.Players.GiftPet_Pets
-                                    local wantMutas = Configuration.Players.GiftPet_Mutations
-                                
-                                    -- ข้อมูล Pet ในคลังผู้เล่น
-                                    for _, PetData in pairs(OwnedPetData:GetChildren()) do
-                                        -- ข้ามตัวที่ถูกล็อก/ไม่พร้อมส่ง (จากเดิมเช็ค not D)
+                                if GiftType == "All_Pets" then
+                                    for _,PetData in pairs(OwnedPetData:GetChildren()) do
                                         if PetData and not PetData:GetAttribute("D") then
-                                            local uid = PetData.Name
-                                            -- พยายามอ่านเมตา (Type/Mutate) จากตาราง OwnedPets ที่คุณประกอบไว้จากโมเดลใน workspace
-                                            local meta = OwnedPets[uid]
-                                            local pType = meta and meta.Type or nil
-                                            local pMuta = meta and meta.Mutate or nil
-                                
-                                            -- ฟังก์ชันตรวจผ่านเงื่อนไข
-                                            local function passFilter()
-                                                if filterType == "All" then
-                                                    return true
-                                                elseif filterType == "Match Pet" then
-                                                    return (pType ~= nil) and (wantPets[pType] == true)
-                                                elseif filterType == "Match Mutation" then
-                                                    return (pMuta ~= nil) and (wantMutas[pMuta] == true)
-                                                elseif filterType == "Match Pet&Mutation" then
-                                                    return (pType ~= nil) and (pMuta ~= nil) and (wantPets[pType] == true) and (wantMutas[pMuta] == true)
-                                                end
-                                                return false
-                                            end
-                                
-                                            -- หมายเหตุ: ถ้า meta ไม่มี (pet ไม่ spawn บนแผนที่ จึงไม่มีใน OwnedPets)
-                                            -- จะส่งได้เฉพาะกรณี filterType == "All" (เพราะไม่รู้ Type/Mutation)
-                                            if (meta == nil and filterType == "All") or (meta ~= nil and passFilter()) then
-                                                CharacterRE:FireServer("Focus", uid)
-                                                task.wait(0.75)
-                                                GiftRE:FireServer(GiftPlayer)
-                                                task.wait(0.75)
-                                            end
+                                            CharacterRE:FireServer("Focus",PetData.Name)
+                                            task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer)
+                                            task.wait(0.75)
                                         end
-                                elseif GiftType == "Foods" then
+                                    end
+                                elseif GiftType == "Match Pet" then
+                                    for _,PetData in pairs(OwnedPetData:GetChildren()) do
+                                        if PetData and not PetData.IsBig and Configuration.Players.Pet_Type[PetData.Type] then
+                                            CharacterRE:FireServer("Focus",PetData.Name)
+                                            task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer)
+                                            task.wait(0.75)
+                                        end
+                                    end
+                                elseif GiftType == "All_Foods" then
                                     for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
                                         if FoodName and table.find(PetFoods_InGame,FoodName) then
                                             for i = 1,FoodAmount do
@@ -612,7 +591,7 @@ if game.PlaceId == 105555311806207 then
                                             end
                                         end
                                     end
-                                elseif GiftType == "Eggs" then
+                                elseif GiftType == "All_Eggs" then
                                     for _,Egg in pairs(OwnedEggData:GetChildren()) do
                                         if Egg and not Egg:FindFirstChild("DI") then
                                             CharacterRE:FireServer("Focus",Egg.Name)
@@ -647,48 +626,33 @@ if game.PlaceId == 105555311806207 then
         })
         Tabs.Players:AddDropdown("GiftType Dropdown", {
             Title = "Gift Type",
-            Values = {"Pets","Foods","Eggs"},
+            Values = {"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","All_Eggs"},
             Multi = false,
             Default = "",
             Callback = function(Value)
                 Configuration.Players.SelectType = Value
             end,
         })
-        -- ▼▼ ฟิลเตอร์การส่ง Pet ▼▼
-        Tabs.Players:AddDropdown("GiftPet Filter Type", {
-            Title = "Gift Pet Filter",
-            Description = "เลือกรูปแบบการคัดกรอง Pet ที่จะส่ง",
-            Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation"},
-            Multi = false,
-            Default = "All",
-            Callback = function(Value)
-                Configuration.Players.GiftPet_FilterType = Value
-            end,
-        })
-
-        Tabs.Players:AddDropdown("GiftPet Pets", {
-            Title = "Gift Pets (Types)",
-            Description = "เลือกประเภท Pet ที่ต้องการส่ง",
+        Tabs.Players:AddDropdown("Pet Type", {
+            Title = "Select Pet Type",
+            Description = "Select Pet Type",
             Values = Pets_InGame,
-            Multi = true,
+            Multi = false,
             Default = {},
             Callback = function(Value)
-                Configuration.Players.GiftPet_Pets = Value
+                Configuration.Players.Pet_Type = Value
             end,
         })
-
-        Tabs.Players:AddDropdown("GiftPet Mutations", {
-            Title = "Gift Pet Mutations",
-            Description = "เลือกมิวเทชันของ Pet ที่ต้องการส่ง",
+        Tabs.Players:AddDropdown("Pet Mutations", {
+            Title = "Select Mutations",
+            Description = "Select Pets Mutations",
             Values = Mutations_InGame,
             Multi = true,
             Default = {},
             Callback = function(Value)
-                Configuration.Players.GiftPet_Mutations = Value
+                Configuration.Players.Pet_Mutations = Value
             end,
         })
-
-
         table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList)
             Players_Dropdown:SetValues(newList)
         end))
