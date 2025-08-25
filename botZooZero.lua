@@ -16,7 +16,7 @@ local Eggs_InGame = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
 local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
 local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
 local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
-
+local InGameConfig = ReplicatedStorage:WaitForChild("Config")
 -- Selection state variables
 local selectedTypeSet = {}
 local selectedMutationSet = {}
@@ -1923,6 +1923,7 @@ local placeEggDropdown = Tabs.PlaceTab:Dropdown({
     Title = "🥚 Pick Pet Types",
     Desc = "Choose which pets to place",
     Values = Pets_InGame,
+    Value = {},
     Multi = true,
     AllowNone = true,
     Callback = function(selection)
@@ -1934,7 +1935,8 @@ local placeEggDropdown = Tabs.PlaceTab:Dropdown({
 local placeMutationDropdown = Tabs.PlaceTab:Dropdown({
     Title = "🧬 Pick Mutations",
     Desc = "Choose which mutations to place (leave empty for all mutations)",
-    Values = Mutations_InGame,
+    Values = {"Golden", "Diamond", "Electric", "Fire", "Jurassic"},
+    Value = {},
     Multi = true,
     AllowNone = true,
     Callback = function(selection)
