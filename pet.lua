@@ -3921,6 +3921,204 @@ task.spawn(function()
     end
 end)
 
+-- === Place Pets (mirror of Place Eggs but reads player's pets) ===
+
+-- Helper: หา container ของ Pets (พยายามหลายเส้นทาง เผื่อเกมอัพเดตโครงสร้าง)
+local function getPetContainer()
+    -- 1) เส้นทางยอดนิยม: LocalPlayer.Data.Pets
+    local data = LocalPlayer:FindFirstChild("Data")
+    if data then
+        local pets = data:FindFirstChild("Pets")
+        if pets then return pets end
+    end
+
+    -- 2) เก็บใน ReplicatedStorage ต่อชื่อผู้เล่น
+    local ps = ReplicatedStorage:FindFirstChild("PlayerStats") or ReplicatedStorage:FindFirstChild("Players") or ReplicatedStorage:FindFirstChild("Data")
+    if ps then
+        local me = ps:FindFirstChild(LocalPlayer.Name)
+        if me then
+            local pets = me:FindFirstChild("Pets") or me:FindFirstChild("Pet") or me:FindFirstChild("OwnedPets")
+            if pets then return pets end
+        end
+    end
+
+    -- 3) Fallback: ลองค้นลึก ๆ (ปลอดภัยด้วย pcall)
+    local ok, found = pcall(function()
+        for _, c in ipairs(LocalPlayer:GetDescendants()) do
+            if c.Name == "Pets" then return c end
+        end
+    end)
+    if ok and found then return found end
+
+    return nil
+end
+
+-- คัดกรอง Pet ตามตัวเลือก (reuse ตัวเลือกชนิด/มิวเทชัน ถ้ามี)
+local function petMatchesSelections(petFolderChild)
+    -- สมมติ PetData มี attribute: Type, Mutation/T
+    if not petFolderChild then return false end
+    local t = petFolderChild:GetAttribute("Type") or petFolderChild:GetAttribute("type") or petFolderChild:FindFirstChild("Type") and petFolderChild.Type.Value
+    local m = petFolderChild:GetAttribute("Mutation") or petFolderChild:GetAttribute("T") or petFolderChild:GetAttribute("Mutate")
+    -- ถ้ามีตัวกรองชนิดไข่เดิม selectedEggTypes ให้ใช้เป็น type filter ของสัตว์ด้วย
+    if type(selectedEggTypes) == "table" and next(selectedEggTypes) ~= nil then
+        if not (t and selectedEggTypes[tostring(t)]) then
+            return false
+        end
+    end
+    -- ถ้ามีตัวกรองมิวเทชันเดิม selectedMutations ก็ลองแมตช์ (ถ้าไม่มี attribute ก็ผ่าน)
+    if type(selectedMutations) == "table" and next(selectedMutations) ~= nil then
+        if m and not selectedMutations[tostring(m)] then
+            return false
+        end
+    end
+    return true
+end
+
+-- อ่านรายการ Pets ที่พร้อมวาง
+local availablePets = {}
+local function updateAvailablePets()
+    table.clear(availablePets)
+    local container = getPetContainer()
+    if not container then return end
+    for _, petNode in ipairs(container:GetChildren()) do
+        -- เงื่อนไข “พร้อมวาง” ปรับได้ตามโครงสร้างเกมของคุณ:
+        -- ที่นิยมคือมี UID/Name/IsPlaced flag ฯลฯ
+        local isPlaced = petNode:GetAttribute("IsPlaced") or petNode:GetAttribute("Placed")
+        if not isPlaced and petMatchesSelections(petNode) then
+            -- เก็บ key/ข้อมูลที่ใช้เรียก Place
+            local uid = petNode:GetAttribute("UID") or petNode.Name
+            table.insert(availablePets, {
+                node = petNode,
+                uid  = uid,
+                type = petNode:GetAttribute("Type") or petNode.Name
+            })
+        end
+    end
+end
+
+-- ใช้ระบบอ่านช่องว่าง (tiles) ที่มีอยู่แล้ว ถ้าโปรเจกต์คุณมี helper ชื่อเดิม เช่น updateAvailableTiles()
+-- สามารถเรียกซ้ำได้เลย; ถ้าไม่มี โค้ดนี้จะสร้าง fallback แบบง่าย ๆ
+local availableTiles = availableTiles or {}
+local function updateAvailableTilesFallback()
+    if updateAvailableTiles then
+        return updateAvailableTiles() -- ใช้ของเดิมถ้ามี
+    end
+    -- ===== Fallback (หาแปลงฟาร์มว่าง ๆ จากเกาะของเรา) =====
+    table.clear(availableTiles)
+    local islandName = LocalPlayer:GetAttribute("AssignedIslandName")
+    if not islandName then return end
+    local art = workspace:FindFirstChild("Art")
+    local island = art and art:FindFirstChild(islandName)
+    local env = island and island:FindFirstChild("ENV")
+    local farm = env and env:FindFirstChild("Farm")
+    if not farm then return end
+    for _, plot in ipairs(farm:GetChildren()) do
+        local isEmpty = plot:GetAttribute("IsEmpty") ~= false and not plot:FindFirstChild("Pet")
+        if isEmpty then
+            table.insert(availableTiles, plot)
+        end
+    end
+end
+
+-- ฟังก์ชันวางสัตว์ (ปรับคำสั่ง FireServer ให้ตรงเกมของคุณ)
+local function placeOnePetOnTile(pet, tile)
+    -- ตัวอย่างรูปแบบที่พบบ่อย:
+    --   CharacterRE:FireServer("Focus", pet.uid)
+    --   CharacterRE:FireServer("Place", pet.uid, tile.Name)  -- หรือ tile:GetAttribute("Index")
+    local Remote = ReplicatedStorage:FindFirstChild("Remote")
+    local CharacterRE = Remote and Remote:FindFirstChild("CharacterRE")
+    if not CharacterRE then return false end
+
+    local ok1 = pcall(function() CharacterRE:FireServer("Focus", pet.uid) end)
+    task.wait(0.25)
+    local ok2 = pcall(function()
+        -- ลองเดาคีย์ตำแหน่งจาก attribute/ชื่อ (แก้ให้ตรงกับเกมคุณได้)
+        local idx = tile:GetAttribute("Index") or tile.Name
+        CharacterRE:FireServer("Place", pet.uid, idx)
+    end)
+    return ok1 and ok2
+end
+
+local function attemptPetPlacement()
+    -- อัปเดตรายการ
+    pcall(updateAvailablePets)
+    pcall(updateAvailableTilesFallback)
+
+    if #availablePets == 0 or #availableTiles == 0 then
+        return false
+    end
+
+    -- วางแบบ 1:1 ไล่จับคู่ pets -> tiles
+    local placed = 0
+    local maxPairs = math.min(#availablePets, #availableTiles)
+    for i = 1, maxPairs do
+        local pet  = availablePets[i]
+        local tile = availableTiles[i]
+        if placeOnePetOnTile(pet, tile) then
+            placed += 1
+            task.wait(0.25)
+        end
+    end
+    return placed > 0
+end
+
+-- UI ใน PlaceTab
+do
+    local section = Tabs.PlaceTab:Section({ Title = "Place Pets", Opened = true })
+
+    section:Label({
+        Title = "อัตโนมัติวางสัตว์เลี้ยงลงฟาร์ม",
+        Desc  = "ใช้ตัวกรองชนิด/มิวเทชันเดียวกับ Place Eggs (ถ้าตั้งไว้)"
+    })
+
+    local autoPlacePetsEnabled = false
+    local autoPlacePetsThread
+
+    section:Toggle({
+        Title = "🏠 Auto Place Pets",
+        Desc  = "วางสัตว์เลี้ยงโดยอัตโนมัติเมื่อมีช่องว่าง",
+        Value = false,
+        Callback = function(state)
+            autoPlacePetsEnabled = state
+            waitForSettingsReady(0.2)
+
+            if state and not autoPlacePetsThread then
+                -- Prime ตอนเริ่ม
+                pcall(updateAvailablePets)
+                pcall(updateAvailableTilesFallback)
+                pcall(attemptPetPlacement)
+
+                autoPlacePetsThread = task.spawn(function()
+                    while autoPlacePetsEnabled do
+                        local ok = attemptPetPlacement()
+                        -- ถ้าวางไม่ได้ให้รอหน่อย ลดการของาน
+                        task.wait(ok and 0.6 or 2.0)
+                    end
+                    autoPlacePetsThread = nil
+                end)
+                WindUI:Notify({ Title = "🏠 Auto Place Pets", Content = "Started", Duration = 3 })
+            elseif (not state) and autoPlacePetsThread then
+                autoPlacePetsEnabled = false
+                WindUI:Notify({ Title = "🏠 Auto Place Pets", Content = "Stopped", Duration = 2 })
+            end
+        end
+    })
+
+    section:Button({
+        Title = "วางตอนนี้ (Place Pets Now)",
+        Callback = function()
+            waitForSettingsReady(0.1)
+            local ok = attemptPetPlacement()
+            WindUI:Notify({
+                Title = "Place Pets",
+                Content = ok and "วางสัตว์สำเร็จบางส่วน" or "ไม่มีสัตว์/ช่องว่างให้วาง",
+                Duration = 3
+            })
+        end
+    })
+end
+-- === End Place Pets ===
+
 
 
 
