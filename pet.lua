@@ -11,7 +11,6 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local vector = { create = function(x, y, z) return Vector3.new(x, y, z) end }
 local LocalPlayer = Players.LocalPlayer
-local InGameConfig = ReplicatedStorage:WaitForChild("Config")
 local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
 local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
 local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
@@ -4018,287 +4017,246 @@ task.spawn(function()
     end
 end)
 
--- =========================
---  PLACE PETS (Auto place)
---  author: you + helper
--- =========================
-
+-- =========================================================
+-- ===============  PLACE PETS (Add-on Section)  ===========
+-- =========================================================
 do
-    -- ===== Services / Refs =====
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
     local LocalPlayer = Players.LocalPlayer
 
+    -- ใช้รีโมตเดียวกับที่เกมใช้สำหรับวางของ/จัดการตัวละคร
     local RemoteFolder = ReplicatedStorage:WaitForChild("Remote")
-    local CharacterRE = RemoteFolder:WaitForChild("CharacterRE") -- ใช้ตัวนี้เป็นหลัก
-    -- ปล. ถ้าเกมอัพเดทชื่อรีโมต ให้แก้ชื่อที่นี่จุดเดียว
+    local CharacterRE = RemoteFolder:FindFirstChild("CharacterRE") or RemoteFolder:WaitForChild("CharacterRE")
 
-    -- ===== In-game config (อ้างโครงสร้างเดียวกับ pet.lua เดิม) =====
-    local InGameConfig = ReplicatedStorage:WaitForChild("Config")
-    local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
-
-    -- ===== State =====
+    -- สถานะการทำงาน
     local autoPlacePetsEnabled = false
     local placePetsThread = nil
 
-    -- ฟิลเตอร์เลือกชนิด Pet และตัวเลือกไม่วาง Big Pet
-    local selectedPetTypes = {}   -- set[string]=true (Type)
+    -- ฟิลเตอร์ชนิดสัตว์ และตัวเลือกหลีกเลี่ยง Big Pet
+    local selectedPetTypes = {}   -- set[string]=true
     local avoidBigPets = false
 
-    -- ===== Helper: เกาะ/กริด =====
-    local function getAssignedIslandName()
-        if not LocalPlayer then return nil end
-        return LocalPlayer:GetAttribute("AssignedIslandName")
-    end
-
-    local function getFarmParts(islandNumber)
-        if not islandNumber then return {} end
-        local art = workspace:FindFirstChild("Art")
-        if not art then return {} end
-
-        local islandName = "Island_" .. tostring(islandNumber)
-        local island = art:FindFirstChild(islandName)
-        if not island then
-            -- ลองรูปแบบอื่น ๆ
-            for _, child in ipairs(art:GetChildren()) do
-                if child.Name:match("^Island[_-]?" .. tostring(islandNumber) .. "$") then
-                    island = child
-                    break
-                end
-            end
-        end
-        if not island then return {} end
-
-        local farms = {}
-        for _, part in ipairs(island:GetChildren()) do
-            if part:IsA("BasePart") and tostring(part.Name):find("Farm") then
-                table.insert(farms, part)
-            end
-        end
-        return farms
-    end
-
-    local function getIslandNumberFromName(islandName)
-        if not islandName then return nil end
-        local m = islandName:match("Island_(%d+)")
-        if m then return tonumber(m) end
-        m = islandName:match("(%d+)")
-        if m then return tonumber(m) end
-        return nil
-    end
-
-    local function buildOccupiedGridSet()
-        -- มาร์คช่องที่มี Pet/ไข่อยู่แล้ว (อิงแนวเดียวกับโค้ดใน BotZoo.lua)
-        local occupied = {}
-
-        -- Pets บนแผนที่
-        local petFolder = workspace:FindFirstChild("Pets")
-        if petFolder then
-            for _, pet in ipairs(petFolder:GetChildren()) do
-                if pet and pet:GetAttribute("IslandCoord") then
-                    local c = pet:GetAttribute("IslandCoord")
-                    local key = tostring(c.X) .. "," .. tostring(c.Z)
-                    occupied[key] = true
-                end
-            end
-        end
-
-        -- Eggs บนแผนที่ (เผื่อเกมถือว่า Egg ใช้ช่องด้วย)
-        local eggsFolder = workspace:FindFirstChild("Eggs")
-        if eggsFolder then
-            local islandName = getAssignedIslandName()
-            local islandEggs = islandName and eggsFolder:FindFirstChild(islandName)
-            if islandEggs then
-                for _, egg in ipairs(islandEggs:GetChildren()) do
-                    if egg and egg:GetAttribute("IslandCoord") then
-                        local c = egg:GetAttribute("IslandCoord")
-                        local key = tostring(c.X) .. "," .. tostring(c.Z)
-                        occupied[key] = true
-                    end
-                end
-            end
-        end
-
-        return occupied
-    end
-
-    local function collectFreeGrids()
-        local islandName = getAssignedIslandName()
-        local islandNo = getIslandNumberFromName(islandName)
-        local farms = getFarmParts(islandNo)
-        local occupied = buildOccupiedGridSet()
-
-        local free = {}
-        for _, farm in ipairs(farms) do
-            local coord = farm:GetAttribute("IslandCoord")
-            if coord then
-                local key = tostring(coord.X) .. "," .. tostring(coord.Z)
-                if not occupied[key] then
-                    table.insert(free, { part = farm, coord = coord })
-                end
-            end
-        end
-        return free
-    end
-
-    -- ===== Helper: รายการ Pet ที่ “อยู่ในคลัง” (ยังไม่วาง) =====
+    ----------------------------------------------------------------
+    -- อ่านรายการ "สัตว์ในคลัง" จาก PlayerGui.Data.Pets (ยังไม่ถูกวาง)
+    -- อ้างอิงแนวทางเดียวกับระบบไข่: ใช้โครงสร้าง Data/Configs เดิมในเกม
+    ----------------------------------------------------------------
     local function getBackpackPets()
-        -- อ่านจาก Data.Pets (GUI Replicated) + cross-check ใน workspace.Pets ว่า UID ไหนถูกวางแล้ว
-        local dataFolder = LocalPlayer:WaitForChild("PlayerGui", 30)
-        dataFolder = dataFolder and dataFolder:FindFirstChild("Data")
-        if not dataFolder then return {} end
+        local list = {}
 
-        local ownedPetData = dataFolder:FindFirstChild("Pets")
-        if not ownedPetData then return {} end
+        local playerGui = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then return list end
+        local data = playerGui:FindFirstChild("Data")
+        if not data then return list end
+        local petsFolder = data:FindFirstChild("Pets")
+        if not petsFolder then return list end
 
-        -- สร้างเซ็ต UID ที่บนแผนที่แล้ว
+        -- ทำเซ็ต UID ที่ถูกวางแล้ว (เช็คใน workspace.Pets)
         local placedUID = {}
-        local petFolder = workspace:FindFirstChild("Pets")
-        if petFolder then
-            for _, pet in ipairs(petFolder:GetChildren()) do
-                local uid = tostring(pet)
-                if uid then placedUID[uid] = true end
+        local worldPets = workspace:FindFirstChild("Pets")
+        if worldPets then
+            for _, m in ipairs(worldPets:GetChildren()) do
+                placedUID[m.Name] = true
             end
         end
 
-        local pets = {}
-        for _, petValue in ipairs(ownedPetData:GetChildren()) do
-            -- ปกติ petValue.Name = UID, Attributes: Type (T), IsBig ฯลฯ
-            local uid = petValue.Name
-            local petType = petValue:GetAttribute("T") or petValue:GetAttribute("Type") or "Unknown"
-            local isBig = petValue:GetAttribute("IsBig") or false
-
+        for _, cfg in ipairs(petsFolder:GetChildren()) do
+            -- ปกติแต่ละตัวคือ Configuration / Instance มี Attribute:
+            --  Name=UID, T|Type=ชนิด, IsBig=บิ๊กหรือไม่
+            local uid = cfg.Name
             if not placedUID[uid] then
-                table.insert(pets, {
+                local petType = tostring(cfg:GetAttribute("T") or cfg:GetAttribute("Type") or "Unknown")
+                local isBig   = cfg:GetAttribute("IsBig") or false
+                table.insert(list, {
                     UID = uid,
-                    Type = tostring(petType),
+                    Type = petType,
                     IsBig = isBig,
-                    _raw = petValue
+                    _raw = cfg,
                 })
             end
         end
-        return pets
+
+        return list
     end
 
-    -- ===== Helper: ตัวกรองตามชนิด และ Big =====
-    local function passPetFilter(pet)
-        if not pet then return false end
-        if avoidBigPets and pet.IsBig then
-            return false
+    ----------------------------------------------------------------
+    -- ฟังก์ชันช่วย: เลือกช่องฟาร์มว่าง (re-use helpers ของส่วน Place Eggs)
+    -- อาศัย getAssignedIslandName, getIslandNumberFromName, getFarmParts,
+    -- และ isFarmTileOccupied (มีอยู่แล้วในไฟล์เดิม)
+    ----------------------------------------------------------------
+    local function getFreeFarmParts()
+        local islandName = getAssignedIslandName()
+        if not islandName then return {} end
+        local islandNo = getIslandNumberFromName(islandName)
+        local farmParts = getFarmParts(islandNo) or {}
+
+        local freeList = {}
+        for _, part in ipairs(farmParts) do
+            if not isFarmTileOccupied(part, 6) then
+                table.insert(freeList, part)
+            end
         end
-        if next(selectedPetTypes) == nil then
-            return true -- ไม่ได้เลือกอะไร = วางหมด
+        return freeList
+    end
+
+    -- เลือกฟาร์มที่ใกล้ที่สุดกับผู้เล่น ก่อน (ให้ดูฉลาดขึ้น)
+    local function pickNearestFreePart(freeParts)
+        if not freeParts or #freeParts == 0 then return nil end
+        local character = LocalPlayer and LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            -- ไม่มีตำแหน่งผู้เล่น ก็สุ่ม ๆ ไปช่องแรก
+            return freeParts[1]
         end
-        return selectedPetTypes[pet.Type] == true
+
+        table.sort(freeParts, function(a, b)
+            return (a.Position - hrp.Position).Magnitude < (b.Position - hrp.Position).Magnitude
+        end)
+        return freeParts[1]
     end
 
-    -- ===== ยิง Remote เพื่อ "วาง" =====
-    local function tryPlacePet(uid, gridCoord)
-        -- เกมมักใช้ CharacterRE:FireServer("Place", "Pet", UID, Vector2/Coord) หรือโครงสร้างคล้ายกัน
-        -- ทำแบบ fallback หลายรูปแบบให้เอง (จะหยุดทันทีที่สำเร็จ)
-        local success = false
-
-        -- รูปแบบ A: ("Place","Pet",UID,gridCoord)
-        local okA = pcall(function()
-            CharacterRE:FireServer("Place", "Pet", uid, gridCoord)
-        end)
-        success = success or okA
-        if success then return true end
-
-        -- รูปแบบ B: ("Place", uid, gridCoord)  -- พบบ่อยในบางอัพเดต
-        local okB = pcall(function()
-            CharacterRE:FireServer("Place", uid, gridCoord)
-        end)
-        success = success or okB
-        if success then return true end
-
-        -- รูปแบบ C: ("PlacePet", uid, gridCoord)
-        local okC = pcall(function()
-            CharacterRE:FireServer("PlacePet", uid, gridCoord)
-        end)
-        success = success or okC
-        if success then return true end
-
-        -- ถ้าไม่สำเร็จ ให้ลองหุ้ม table พารามิเตอร์
-        local okD = pcall(function()
-            CharacterRE:FireServer("Place", {UID = uid, Coord = gridCoord})
-        end)
-        success = success or okD
-
-        return success
+    ----------------------------------------------------------------
+    -- ฟังก์ชันช่วย: ผ่านฟิลเตอร์ไหม
+    ----------------------------------------------------------------
+    local function passPetFilter(p)
+        if not p then return false end
+        if avoidBigPets and p.IsBig then return false end
+        if next(selectedPetTypes) == nil then return true end -- ไม่เลือก = วางทั้งหมด
+        return selectedPetTypes[p.Type] == true
     end
 
-    -- ===== วนวาง =====
+    ----------------------------------------------------------------
+    -- ยิงรีโมต "วางสัตว์"
+    -- ทำ fallback หลายรูปแบบ (เผื่อเซิร์ฟเวอร์เปลี่ยนซิกเนเจอร์)
+    ----------------------------------------------------------------
+    local function tryPlacePet(uid, coordVector2_or_cf_or_vec3)
+        local ok = false
+
+        -- รูปแบบ A: ("Place","Pet",UID,Coord)
+        ok = pcall(function()
+            CharacterRE:FireServer("Place", "Pet", uid, coordVector2_or_cf_or_vec3)
+        end)
+        if ok then return true end
+
+        -- รูปแบบ B: ("PlacePet", UID, Coord)
+        ok = pcall(function()
+            CharacterRE:FireServer("PlacePet", uid, coordVector2_or_cf_or_vec3)
+        end)
+        if ok then return true end
+
+        -- รูปแบบ C: ("Place", UID, Coord)
+        ok = pcall(function()
+            CharacterRE:FireServer("Place", uid, coordVector2_or_cf_or_vec3)
+        end)
+        if ok then return true end
+
+        -- รูปแบบ D: ("Place", {UID=..,Coord=..})
+        ok = pcall(function()
+            CharacterRE:FireServer("Place", { UID = uid, Coord = coordVector2_or_cf_or_vec3 })
+        end)
+        return ok
+    end
+
+    ----------------------------------------------------------------
+    -- วนทำงาน Auto Place Pets
+    -- แปลงตำแหน่งฟาร์มเป็นพิกัดที่เซิร์ฟเวอร์เข้าใจ:
+    --   ถ้าไข่ใช้ Vector3 สูงจากพื้น ~12, สัตว์ส่วนมากใช้จุดศูนย์กลางกระเบื้อง/พิกัดกริด
+    ----------------------------------------------------------------
     local function runAutoPlacePets()
         while autoPlacePetsEnabled do
-            local pets = getBackpackPets()
-            local free = collectFreeGrids()
-
-            if #pets == 0 or #free == 0 then
+            local backpack = getBackpackPets()
+            if #backpack == 0 then
                 task.wait(1.0)
-            else
-                -- จับคู่ทีละตัว
-                local placedCount = 0
-                for _, pet in ipairs(pets) do
-                    if not autoPlacePetsEnabled then break end
-                    if passPetFilter(pet) then
-                        local slot = table.remove(free, 1)
-                        if slot and slot.coord then
-                            local ok = tryPlacePet(pet.UID, slot.coord)
-                            if ok then
-                                placedCount += 1
-                                -- หน่วงสั้น ๆ กันสแปม
-                                task.wait(0.2)
-                            end
-                        end
-                        if #free == 0 then break end
+                goto continue
+            end
+
+            local freeParts = getFreeFarmParts()
+            if #freeParts == 0 then
+                task.wait(1.0)
+                goto continue
+            end
+
+            local placed = 0
+            for _, pet in ipairs(backpack) do
+                if not autoPlacePetsEnabled then break end
+                if passPetFilter(pet) then
+                    local part = pickNearestFreePart(freeParts)
+                    if not part then break end
+
+                    -- พยายามส่งพิกัดในหลายรูปแบบ:
+                    -- 1) ใช้ Attribute IslandCoord ถ้ามี (Vector2)  ==> โปรดิวเซิร์ฟเวอร์ชอบมากที่สุด
+                    local coord = part:GetAttribute("IslandCoord")
+                    local success = false
+                    if coord then
+                        success = tryPlacePet(pet.UID, coord)
+                    end
+
+                    -- 2) ถ้าไม่สำเร็จ ส่งตำแหน่ง Vector3 ของผิวกระเบื้อง (สูงกว่าเล็กน้อย)
+                    if not success then
+                        local placePos = Vector3.new(part.Position.X, part.Position.Y + 12, part.Position.Z)
+                        success = tryPlacePet(pet.UID, placePos)
+                    end
+
+                    if success then
+                        -- เอาช่องนี้ออกจากลิสต์ว่าง
+                        table.remove(freeParts, table.find(freeParts, part))
+                        placed += 1
+                        task.wait(0.2)
+                        if #freeParts == 0 then break end
                     end
                 end
-                -- เว้นจังหวะรอบถัดไป
-                if placedCount == 0 then
-                    task.wait(1.0)
-                end
             end
+
+            if placed == 0 then
+                task.wait(1.0)
+            end
+
+            ::continue::
         end
     end
 
-    -- ===== UI: Tab “Place Pets” =====
-    local uiTab = Tabs.PlaceTab or Window:Section({ Title = "Place" }):Tab({ Title = " | Place Pets" })
+    ----------------------------------------------------------------
+    -- UI: เพิ่มในแท็บ Place (ใช้แท็บเดิม " | Place Eggs " ที่สร้างไว้แล้ว)
+    ----------------------------------------------------------------
+    local placeTab = Tabs.PlaceTab
 
-    uiTab:Label({ Title = "Place Pets (เหมือน Place Eggs แต่สำหรับสัตว์ที่อยู่ในคลัง)" })
-
-    -- Multi-select Pet Types จาก ResPet (เอาชื่อ Type ทั้งหมด)
-    local allTypes = {}
-    do
-        for id, val in pairs(Pets_InGame) do
-            local idStr = tostring(id)
-            if not idStr:match("^__?index$") and not idStr:match("^_") then
-                local t = (type(val)=="table" and (val.Type or val.Name)) or idStr
+    -- ดึงชนิดสัตว์ทั้งหมดจาก Config เพื่อลิสต์ในดรอปดาวน์
+    local allPetTypes = {}
+    local ok, cfg = pcall(function()
+        local InGameConfig = ReplicatedStorage:WaitForChild("Config")
+        return require(InGameConfig:WaitForChild("ResPet"))
+    end)
+    if ok and type(cfg) == "table" then
+        for k, v in pairs(cfg) do
+            local ks = tostring(k)
+            if not ks:match("^__?index$") and not ks:match("^_") then
+                local t = (type(v)=="table" and (v.Type or v.Name)) or ks
                 t = tostring(t)
-                if not table.find(allTypes, t) then
-                    table.insert(allTypes, t)
+                if not table.find(allPetTypes, t) then
+                    table.insert(allPetTypes, t)
                 end
             end
         end
-        table.sort(allTypes)
+        table.sort(allPetTypes)
     end
 
-    local typesDropdown = uiTab:Dropdown({
+    placeTab:Label({ Title = "Place Pets (วางสัตว์ในคลังลงช่องว่างอัตโนมัติ)" })
+
+    local petTypeMulti = placeTab:Dropdown({
         Title = "ชนิดสัตว์ที่จะวาง",
-        Desc  = "เลือกหลายรายการได้ (ปล่อยว่าง = วางทั้งหมด)",
-        Values = allTypes,
+        Desc  = "ปล่อยว่าง = วางทุกชนิด",
+        Values = allPetTypes,
         Multi = true,
         Default = {},
         Callback = function(values)
-            -- values เป็น array ของชนิดที่เลือก
             selectedPetTypes = {}
-            for _, v in ipairs(values) do
+            for _, v in ipairs(values or {}) do
                 selectedPetTypes[tostring(v)] = true
             end
         end
     })
 
-    uiTab:Toggle({
+    placeTab:Toggle({
         Title = "หลีกเลี่ยง Big Pet",
         Desc  = "ติ๊กแล้วจะไม่วางสัตว์ที่เป็น Big",
         Value = false,
@@ -4307,29 +4265,34 @@ do
         end
     })
 
-    uiTab:Button({
+    placeTab:Button({
         Title = "รีเฟรชชนิดสัตว์จาก ResPet",
         Callback = function()
-            -- เผื่อเกมอัพเดต ResPet ระหว่างเล่น
-            for i = #allTypes, 1, -1 do table.remove(allTypes, i) end
-            for id, val in pairs(Pets_InGame) do
-                local idStr = tostring(id)
-                if not idStr:match("^__?index$") and not idStr:match("^_") then
-                    local t = (type(val)=="table" and (val.Type or val.Name)) or idStr
-                    t = tostring(t)
-                    if not table.find(allTypes, t) then
-                        table.insert(allTypes, t)
+            table.clear(allPetTypes)
+            local ok2, cfg2 = pcall(function()
+                local InGameConfig = ReplicatedStorage:WaitForChild("Config")
+                return require(InGameConfig:WaitForChild("ResPet"))
+            end)
+            if ok2 and type(cfg2)=="table" then
+                for k, v in pairs(cfg2) do
+                    local ks = tostring(k)
+                    if not ks:match("^__?index$") and not ks:match("^_") then
+                        local t = (type(v)=="table" and (v.Type or v.Name)) or ks
+                        t = tostring(t)
+                        if not table.find(allPetTypes, t) then
+                            table.insert(allPetTypes, t)
+                        end
                     end
                 end
+                table.sort(allPetTypes)
+                petTypeMulti:SetValues(allPetTypes)
             end
-            table.sort(allTypes)
-            typesDropdown:SetValues(allTypes)
         end
     })
 
-    uiTab:Toggle({
+    placeTab:Toggle({
         Title = "🏠 Auto Place Pets",
-        Desc  = "วางสัตว์จากคลังลงช่องว่างโดยอัตโนมัติ",
+        Desc  = "เปิดเพื่อให้ระบบวางสัตว์โดยอัตโนมัติ",
         Value = false,
         Callback = function(state)
             autoPlacePetsEnabled = state
@@ -4343,13 +4306,13 @@ do
                 end
             elseif (not state) and placePetsThread then
                 if WindUI and WindUI.Notify then
-                    WindUI:Notify({ Title="Place Pets", Content="หยุดทำงานแล้ว", Duration=3 })
+                    WindUI:Notify({ Title="Place Pets", Content="หยุดทำงานแล้ว", Duration=2 })
                 end
             end
         end
     })
-
 end
+-- ==========================  END ADD-ON  ==========================
 
 
 
