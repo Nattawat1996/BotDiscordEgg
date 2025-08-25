@@ -1097,6 +1097,12 @@ local function getEggContainer()
     return data and data:FindFirstChild("Egg") or nil
 end
 
+local function getPetContainer()
+    local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
+    local data = pg and pg:FindFirstChild("Data")
+    return data and data:FindFirstChild("Pets") or nil
+end
+
 -- Function to read mutation from egg configuration
 local function getEggMutation(eggUID)
     local localPlayer = Players.LocalPlayer
@@ -1980,9 +1986,11 @@ local autoBuyToggle = Tabs.AutoTab:Toggle({
 -- Auto Feed Functions moved to AutoFeedSystem.lua
 
 -- Event-driven Auto Place functionality
+local petPlaceConnections = {}
 local placeConnections = {}
 local placingInProgress = false
 local availableEggs = {} -- Track available eggs to place
+local availablePets = {} -- Track available eggs to place
 local availableTiles = {} -- Track available tiles
 local selectedEggTypes = {} -- Selected egg types for placement
 local selectedMutations = {} -- Selected mutations for placement
@@ -2282,223 +2290,7 @@ local function scanAllTilesAndModels()
         end
     end
     
-    -- ===== Place Pets: state =====
-local availablePets = {}
-local petPlaceConnections = {}
-
-local function cleanupPetPlaceConnections()
-    for _,conn in ipairs(petPlaceConnections) do
-        pcall(function()
-            if typeof(conn) == "RBXScriptConnection" then conn:Disconnect() end
-            if type(conn) == "table" and conn.disconnect then conn.disconnect() end
-        end)
-    end
-    petPlaceConnections = {}
-end
-
--- เอารายการ "สัตว์ของผู้เล่น" จาก PlayerGui.Data.Pets (ใช้ helper ที่มีอยู่แล้ว)
--- getPlayerPetConfigurations() มีอยู่ในไฟล์แล้ว (คืนค่า { {name=..., config=...}, ... })
--- findPetInWorkspace(name) ก็มีแล้ว
-local function getPetContainer()
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
-    return pg and pg:FindFirstChild("Data") and pg.Data:FindFirstChild("Pets") or nil
-end
-
-local function updateAvailablePets()
-    availablePets = {}
-    -- ดึงรายชื่อสัตว์ทั้งหมดจาก Data.Pets
-    local list = getPlayerPetConfigurations()
-    for _,info in ipairs(list) do
-        -- ข้ามตัวที่ "เกิดแล้ว" อยู่ใน workspace.Pets
-        if not findPetInWorkspace(info.name) then
-            table.insert(availablePets, { uid = info.name }) -- ใช้ชื่อคอนฟิกเป็น uid
-        end
-    end
-end
-
--- ฟังก์ชันวางสัตว์ลง tile (อ้างโครงจาก placeEggInstantly)
-local function placePetInstantly(petInfo, tileInfo)
-    if not petInfo or not tileInfo then return false end
-    local petUID = petInfo.uid
-    local tilePart = tileInfo.part
-    if not petUID or not tilePart then return false end
-
-    -- เตรียมพื้นผิวบนสุดของ tile
-    local surfacePosition = Vector3.new(
-        tilePart.Position.X,
-        tilePart.Position.Y + (tilePart.Size.Y / 2), -- ด้านบนของก้อน 8x8x8
-        tilePart.Position.Z
-    )
-
-    -- (ถ้าจำเป็น) ถือ slot pet: เกมนี้ใช้ RE ฝั่ง Character เหมือนไข่
-    -- ลองใช้ keybind เดียวกับไข่ก่อน (Two = หมายเลข 2) หากเกมคุณใช้ปุ่ม/slot อื่น เปลี่ยนตรงนี้ได้
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Two, false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Two, false, game)
-    end)
-
-    -- เทเลพอร์ตไป tile (ช่วยให้ place ติด)
-    local char = Players.LocalPlayer.Character
-    if char then
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.CFrame = CFrame.new(tilePart.Position)
-            task.wait(0.1)
-        end
-    end
-
-    -- คำสั่ง Place ใช้เหมือนไข่: CharacterRE "Place" พร้อม DST และ ID = ชื่อสัตว์
-    local args = {
-        "Place",
-        { DST = vector.create(surfacePosition.X, surfacePosition.Y, surfacePosition.Z), ID = petUID }
-    }
-
-    local ok = pcall(function()
-        ReplicatedStorage:WaitForChild("Remote"):WaitForChild("CharacterRE"):FireServer(unpack(args))
-    end)
-
-    -- ตรวจว่าลงจริง: มองใน workspace.Pets หาโมเดลชื่อนี้อยู่ใกล้ ๆ จุดวาง
-    task.wait(0.3)
-    local placed = false
-    local workspacePets = workspace:FindFirstChild("Pets")
-    if workspacePets then
-        local model = workspacePets:FindFirstChild(petUID)
-        if model and model:IsA("Model") then
-            local pos = model:GetPivot().Position
-            if (pos - surfacePosition).Magnitude <= 6 then
-                placed = true
-            end
-        end
-    end
-
-    -- อัปเดตรายการ
-    if placed then
-        for i, p in ipairs(availablePets) do
-            if p.uid == petUID then table.remove(availablePets, i) break end
-        end
-        for i, tile in ipairs(availableTiles) do
-            if tile.index == tileInfo.index then table.remove(availableTiles, i) break end
-        end
-        return true
-    else
-        -- ถ้าวางไม่ติด ตัด tile นี้ทิ้ง กันวนซ้ำจุดเดิม
-        for i, tile in ipairs(availableTiles) do
-            if tile.index == tileInfo.index then table.remove(availableTiles, i) break end
-        end
-        return false
-    end
-end
-
--- วนพยายามวางสัตว์ คล้าย attemptPlacement (ของไข่)
-local function attemptPlacementPets()
-    if #availablePets == 0 then
-        warn("Auto Place Pet: No pets to place")
-        return
-    end
-    if #availableTiles == 0 then
-        warn("Auto Place Pet: No available tiles")
-        return
-    end
-
-    local attempts = 0
-    local maxAttempts = math.min(#availablePets, #availableTiles, 1) -- ทำทีละ 1 กันแลค (ปรับได้)
-    while #availablePets > 0 and #availableTiles > 0 and attempts < maxAttempts do
-        attempts += 1
-
-        -- double-check ว่า tile ยังว่าง
-        local tileInfo = availableTiles[1]
-        local stillFree = tileInfo and (not isFarmTileOccupied(tileInfo.part, 6))
-        if stillFree then
-            if placePetInstantly(availablePets[1], availableTiles[1]) then
-                task.wait(0.2)
-            else
-                task.wait(0.1)
-            end
-        else
-            table.remove(availableTiles, 1)
-        end
-    end
-end
-
--- Monitoring แบบเดียวกับ eggs แต่ดู Data.Pets + workspace.Pets
-local function setupPlacementMonitoringPets()
-    -- Data.Pets เปลี่ยน (รับสัตว์เพิ่ม/ลด)
-    local petsContainer = getPetContainer()
-    if petsContainer then
-        local function onPetChanged()
-            if not autoPlacePetEnabled then return end
-            task.wait(0.2)
-            updateAvailablePets()
-            updateAvailableTiles()
-            attemptPlacementPets()
-        end
-        table.insert(petPlaceConnections, petsContainer.ChildAdded:Connect(onPetChanged))
-        table.insert(petPlaceConnections, petsContainer.ChildRemoved:Connect(onPetChanged))
-    end
-
-    -- workspace.Pets เปลี่ยน (เกิด/ย้ายออก)
-    local workspacePets = workspace:FindFirstChild("Pets")
-    if workspacePets then
-        local function onWorkspacePetsChanged()
-            if not autoPlacePetEnabled then return end
-            task.wait(0.2)
-            updateAvailableTiles()
-            -- (ไม่ต้อง updateAvailablePets ทุกครั้งก็ได้ แต่เพื่อความชัวร์)
-            updateAvailablePets()
-            attemptPlacementPets()
-        end
-        table.insert(petPlaceConnections, workspacePets.ChildAdded:Connect(onWorkspacePetsChanged))
-        table.insert(petPlaceConnections, workspacePets.ChildRemoved:Connect(onWorkspacePetsChanged))
-    end
-
-    -- อัปเดตเป็นช่วงๆ ให้ไหลลื่น
-    local thread = task.spawn(function()
-        while autoPlacePetEnabled do
-            updateAvailablePets()
-            updateAvailableTiles()
-            attemptPlacementPets()
-            task.wait(1.5)
-        end
-    end)
-    table.insert(petPlaceConnections, { disconnect = function() thread = nil end })
-end
-
--- รวมรันลูปอัตโนมัติของ Pets (ใช้ pattern เดียวกับ runAutoPlace)
-local function runAutoPlacePets()
-    while autoPlacePetEnabled do
-        local islandName = getAssignedIslandName()
-        if not islandName or islandName == "" then
-            task.wait(1)
-            continue
-        end
-        cleanupPetPlaceConnections()
-        setupPlacementMonitoringPets()
-        while autoPlacePetEnabled do
-            local currentIsland = getAssignedIslandName()
-            if currentIsland ~= islandName then break end
-            task.wait(0.5)
-        end
-    end
-    cleanupPetPlaceConnections()
-end
-
--- ปรับข้อความ notify ของ Toggle Place Pet
--- (แก้ของเดิมให้สื่อว่าเป็น Pets)
--- หา autoPlacePetToggle ที่คุณสร้างไว้ แล้วแก้ใน Callback:
--- WindUI:Notify({ Title = " Auto Place", Content = "Started - Placing Pets automatically! ", Duration = 3 })
--- WindUI:Notify({ Title = " Auto Place", Content = "Stopped (Pets)", Duration = 3 })
-
--- ถ้ายังไม่มี thread แยกสำหรับ pets ให้สตาร์ทด้วย
--- (แนวทาง: ใช้ autoPlaceThread ตัวเดียวสลับงาน หรือทำตัวใหม่ก็ได้)
--- ตัวอย่าง (ถ้าอยากแยก):
--- if state and not autoPlacePetThread then
---     autoPlacePetThread = task.spawn(function()
---         runAutoPlacePets()
---         autoPlacePetThread = nil
---     end)
--- end
-
+    
     -- Count locked tiles
     local art = workspace:FindFirstChild("Art")
     if art then
@@ -2573,6 +2365,15 @@ local function cleanupPlaceConnections()
     placeConnections = {}
 end
 
+local function cleanupPetPlaceConnections()
+    for _,conn in ipairs(petPlaceConnections) do
+        pcall(function()
+            if typeof(conn) == "RBXScriptConnection" then conn:Disconnect() end
+            if type(conn) == "table" and conn.disconnect then conn.disconnect() end
+        end)
+    end
+    petPlaceConnections = {}
+end
 
 
 
@@ -2740,6 +2541,80 @@ local function placeEggInstantly(eggInfo, tileInfo)
     end
 end
 
+-- ฟังก์ชันวางสัตว์ลง tile (อ้างโครงจาก placeEggInstantly)
+local function placePetInstantly(petInfo, tileInfo)
+    if not petInfo or not tileInfo then return false end
+    local petUID = petInfo.uid
+    local tilePart = tileInfo.part
+    if not petUID or not tilePart then return false end
+
+    -- เตรียมพื้นผิวบนสุดของ tile
+    local surfacePosition = Vector3.new(
+        tilePart.Position.X,
+        tilePart.Position.Y + (tilePart.Size.Y / 2), -- ด้านบนของก้อน 8x8x8
+        tilePart.Position.Z
+    )
+
+    -- (ถ้าจำเป็น) ถือ slot pet: เกมนี้ใช้ RE ฝั่ง Character เหมือนไข่
+    -- ลองใช้ keybind เดียวกับไข่ก่อน (Two = หมายเลข 2) หากเกมคุณใช้ปุ่ม/slot อื่น เปลี่ยนตรงนี้ได้
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Two, false, game)
+        task.wait(0.1)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Two, false, game)
+    end)
+
+    -- เทเลพอร์ตไป tile (ช่วยให้ place ติด)
+    local char = Players.LocalPlayer.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.CFrame = CFrame.new(tilePart.Position)
+            task.wait(0.1)
+        end
+    end
+
+    -- คำสั่ง Place ใช้เหมือนไข่: CharacterRE "Place" พร้อม DST และ ID = ชื่อสัตว์
+    local args = {
+        "Place",
+        { DST = vector.create(surfacePosition.X, surfacePosition.Y, surfacePosition.Z), ID = petUID }
+    }
+
+    local ok = pcall(function()
+        ReplicatedStorage:WaitForChild("Remote"):WaitForChild("CharacterRE"):FireServer(unpack(args))
+    end)
+
+    -- ตรวจว่าลงจริง: มองใน workspace.Pets หาโมเดลชื่อนี้อยู่ใกล้ ๆ จุดวาง
+    task.wait(0.3)
+    local placed = false
+    local workspacePets = workspace:FindFirstChild("Pets")
+    if workspacePets then
+        local model = workspacePets:FindFirstChild(petUID)
+        if model and model:IsA("Model") then
+            local pos = model:GetPivot().Position
+            if (pos - surfacePosition).Magnitude <= 6 then
+                placed = true
+            end
+        end
+    end
+
+    -- อัปเดตรายการ
+    if placed then
+        for i, p in ipairs(availablePets) do
+            if p.uid == petUID then table.remove(availablePets, i) break end
+        end
+        for i, tile in ipairs(availableTiles) do
+            if tile.index == tileInfo.index then table.remove(availableTiles, i) break end
+        end
+        return true
+    else
+        -- ถ้าวางไม่ติด ตัด tile นี้ทิ้ง กันวนซ้ำจุดเดิม
+        for i, tile in ipairs(availableTiles) do
+            if tile.index == tileInfo.index then table.remove(availableTiles, i) break end
+        end
+        return false
+    end
+end
+
 local function attemptPlacement()
     if #availableEggs == 0 then 
         warn("Auto Place stopped: No eggs available")
@@ -2835,6 +2710,37 @@ local function attemptPlacement()
     -- Placement attempt completed
 end
 
+-- วนพยายามวางสัตว์ คล้าย attemptPlacement (ของไข่)
+local function attemptPlacementPets()
+    if #availablePets == 0 then
+        warn("Auto Place Pet: No pets to place")
+        return
+    end
+    if #availableTiles == 0 then
+        warn("Auto Place Pet: No available tiles")
+        return
+    end
+
+    local attempts = 0
+    local maxAttempts = math.min(#availablePets, #availableTiles, 1) -- ทำทีละ 1 กันแลค (ปรับได้)
+    while #availablePets > 0 and #availableTiles > 0 and attempts < maxAttempts do
+        attempts += 1
+
+        -- double-check ว่า tile ยังว่าง
+        local tileInfo = availableTiles[1]
+        local stillFree = tileInfo and (not isFarmTileOccupied(tileInfo.part, 6))
+        if stillFree then
+            if placePetInstantly(availablePets[1], availableTiles[1]) then
+                task.wait(0.2)
+            else
+                task.wait(0.1)
+            end
+        else
+            table.remove(availableTiles, 1)
+        end
+    end
+end
+
 local function setupPlacementMonitoring()
     -- Monitor for new eggs in PlayerGui.Data.Egg
     local eggContainer = getEggContainer()
@@ -2898,6 +2804,49 @@ local function setupPlacementMonitoring()
     table.insert(placeConnections, { disconnect = function() updateThread = nil end })
 end
 
+-- Monitoring แบบเดียวกับ eggs แต่ดู Data.Pets + workspace.Pets
+local function setupPlacementMonitoringPets()
+    -- Data.Pets เปลี่ยน (รับสัตว์เพิ่ม/ลด)
+    local petsContainer = getPetContainer()
+    if petsContainer then
+        local function onPetChanged()
+            if not autoPlacePetEnabled then return end
+            task.wait(0.2)
+            updateAvailablePets()
+            updateAvailableTiles()
+            attemptPlacementPets()
+        end
+        table.insert(petPlaceConnections, petsContainer.ChildAdded:Connect(onPetChanged))
+        table.insert(petPlaceConnections, petsContainer.ChildRemoved:Connect(onPetChanged))
+    end
+
+    -- workspace.Pets เปลี่ยน (เกิด/ย้ายออก)
+    local workspacePets = workspace:FindFirstChild("Pets")
+    if workspacePets then
+        local function onWorkspacePetsChanged()
+            if not autoPlacePetEnabled then return end
+            task.wait(0.2)
+            updateAvailableTiles()
+            -- (ไม่ต้อง updateAvailablePets ทุกครั้งก็ได้ แต่เพื่อความชัวร์)
+            updateAvailablePets()
+            attemptPlacementPets()
+        end
+        table.insert(petPlaceConnections, workspacePets.ChildAdded:Connect(onWorkspacePetsChanged))
+        table.insert(petPlaceConnections, workspacePets.ChildRemoved:Connect(onWorkspacePetsChanged))
+    end
+
+    -- อัปเดตเป็นช่วงๆ ให้ไหลลื่น
+    local thread = task.spawn(function()
+        while autoPlacePetEnabled do
+            updateAvailablePets()
+            updateAvailableTiles()
+            attemptPlacementPets()
+            task.wait(1.5)
+        end
+    end)
+    table.insert(petPlaceConnections, { disconnect = function() thread = nil end })
+end
+
 local function runAutoPlace()
     while autoPlaceEnabled do
         -- Check priority - if Auto Hatch is running and has priority, pause placing
@@ -2929,6 +2878,25 @@ local function runAutoPlace()
     end
     
     cleanupPlaceConnections()
+end
+
+-- รวมรันลูปอัตโนมัติของ Pets (ใช้ pattern เดียวกับ runAutoPlace)
+local function runAutoPlacePets()
+    while autoPlacePetEnabled do
+        local islandName = getAssignedIslandName()
+        if not islandName or islandName == "" then
+            task.wait(1)
+            continue
+        end
+        cleanupPetPlaceConnections()
+        setupPlacementMonitoringPets()
+        while autoPlacePetEnabled do
+            local currentIsland = getAssignedIslandName()
+            if currentIsland ~= islandName then break end
+            task.wait(0.5)
+        end
+    end
+    cleanupPetPlaceConnections()
 end
 
 local autoPlaceToggle = Tabs.PlaceTab:Toggle({
