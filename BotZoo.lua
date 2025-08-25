@@ -573,11 +573,14 @@ if game.PlaceId == 105555311806207 then
                                     end
                                 elseif GiftType == "Match Pet" then
                                     for _,PetData in pairs(OwnedPetData:GetChildren()) do
-                                        if PetData and Configuration.Players.Pet_Type[PetData.Type] then
-                                            CharacterRE:FireServer("Focus",PetData.Name)
-                                            task.wait(0.75)
-                                            GiftRE:FireServer(GiftPlayer)
-                                            task.wait(0.75)
+                                        if PetData then
+                                            local petType = PetData:GetAttribute("T")  -- อ่าน attr "T"
+                                            if petType and Configuration.Players.Pet_Type[petType] then
+                                                CharacterRE:FireServer("Focus", PetData.Name)
+                                                task.wait(0.75)
+                                                GiftRE:FireServer(GiftPlayer)
+                                                task.wait(0.75)
+                                            end
                                         end
                                     end
                                 elseif GiftType == "All_Foods" then
