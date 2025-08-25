@@ -1,17 +1,7 @@
 -- Build A Zoo: Auto Buy Egg using WindUI
 
 -- Load WindUI library (same as in Windui.lua)
-local WINDUI_URL = "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/main.lua"
-
-local okGet, srcOrErr = pcall(function()
-    return game:HttpGet(WINDUI_URL)
-end)
-assert(okGet and type(srcOrErr)=="string" and #srcOrErr>0, "HttpGet WindUI failed: "..tostring(srcOrErr))
-
-local chunk, lerr = loadstring(srcOrErr)
-assert(chunk, "WindUI compile failed: "..tostring(lerr))
-
-local WindUI = chunk()  -- ปลอดภัยแล้ว
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 -- Services
 local Players = game:GetService("Players")
@@ -21,10 +11,7 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local vector = { create = function(x, y, z) return Vector3.new(x, y, z) end }
 local LocalPlayer = Players.LocalPlayer
-local InGameConfig = ReplicatedStorage:WaitForChild("Config")
-local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
-local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
-local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
+
 -- Selection state variables
 local selectedTypeSet = {}
 local selectedMutationSet = {}
@@ -58,8 +45,7 @@ local Window = WindUI:CreateWindow({
 local Tabs = {}
 Tabs.MainSection = Window:Section({ Title = "🤖 Auto Helpers", Opened = true })
 Tabs.AutoTab = Tabs.MainSection:Tab({ Title = "🥚 | Buy Eggs"})
-Tabs.PlaceTab = Tabs.MainSection:Tab({ Title = "🏠 | Place Eggs"})
-Tabs.PlacePetTab = Tabs.MainSection:Tab({ Title = "🏠 | Place Pets"})
+Tabs.PlaceTab = Tabs.MainSection:Tab({ Title = "🏠 | Place Pets"})
 Tabs.HatchTab = Tabs.MainSection:Tab({ Title = "⚡ | Hatch Eggs"})
 Tabs.ClaimTab = Tabs.MainSection:Tab({ Title = "💰 | Get Money"})
 Tabs.ShopTab = Tabs.MainSection:Tab({ Title = "🛒 | Shop"})
@@ -230,7 +216,6 @@ end
 
 local autoFeedEnabled = false
 local autoPlaceEnabled = false
-local autoPlacePetEnabled = false
 local autoPlaceThread = nil
 local autoHatchEnabled = false
 local antiAFKEnabled = false
@@ -433,58 +418,6 @@ local function getEggMutation(eggUID)
                         local eggGUI = rootPart:FindFirstChild("GUI/EggGUI")
                         if eggGUI then
                             local mutateText = eggGUI:FindFirstChild("Mutate")
-                            if mutateText and mutateText:IsA("TextLabel") then
-                                local mutationText = mutateText.Text
-                                if mutationText and mutationText ~= "" then
-                                    -- Handle special case: if mutation is "Dino", return "Jurassic"
-                                    if string.lower(mutationText) == "dino" then
-                                        return "Jurassic"
-                                    end
-                                    return mutationText
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    return nil
-end
-
-
-local function getPetMutation(petUID)
-    if not petUID then return nil end
-    
-    local islandName = getAssignedIslandName()
-    if not islandName then return nil end
-    
-    local art = workspace:FindFirstChild("Art")
-    if not art then return nil end
-    
-    local island = art:FindFirstChild(islandName)
-    if not island then return nil end
-    
-    local env = island:FindFirstChild("ENV")
-    if not env then return nil end
-    
-    local conveyor = env:FindFirstChild("Conveyor")
-    if not conveyor then return nil end
-    
-    -- Check all conveyor belts
-    for i = 1, 9 do
-        local conveyorBelt = conveyor:FindFirstChild("Conveyor" .. i)
-        if conveyorBelt then
-            local belt = conveyorBelt:FindFirstChild("Belt")
-            if belt then
-                local petModel = belt:FindFirstChild(petUID)
-                if petModel and petModel:IsA("Model") then
-                    local rootPart = petModel:FindFirstChild("RootPart")
-                    if rootPart then
-                        local petGUI = rootPart:FindFirstChild("GUI/PetsGUI")
-                        if petGUI then
-                            local mutateText = petGUI:FindFirstChild("Mutate")
                             if mutateText and mutateText:IsA("TextLabel") then
                                 local mutationText = mutateText.Text
                                 if mutationText and mutationText ~= "" then
@@ -1104,12 +1037,6 @@ end
 local function getEggContainer()
     local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
     local data = pg and pg:FindFirstChild("Data")
-    return data and data:FindFirstChild("Egg") or nil
-end
-
-local function getPetContainer()
-    local pg = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")
-    local data = pg and pg:FindFirstChild("Data")
     return data and data:FindFirstChild("Pets") or nil
 end
 
@@ -1141,33 +1068,6 @@ local function getEggMutation(eggUID)
     return mutation
 end
 
-local function getPetMutation(petUID)
-    local localPlayer = Players.LocalPlayer
-    if not localPlayer then return nil end
-    
-    local playerGui = localPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then return nil end
-    
-    local data = playerGui:FindFirstChild("Data")
-    if not data then return nil end
-    
-    local petContainer = data:FindFirstChild("Pets")
-    if not petContainer then return nil end
-    
-    local petConfig = eggContainer:FindFirstChild(eggUID)
-    if not petConfig then return nil end
-    
-    -- Read the M attribute (mutation)
-    local mutation = petConfig:GetAttribute("M")
-    
-    -- Map "Dino" to "Jurassic" for consistency
-    if mutation == "Dino" then
-        mutation = "Jurassic"
-    end
-    
-    return mutation
-end
-
 local function listAvailableEggUIDs()
     local eg = getEggContainer()
     local uids = {}
@@ -1182,34 +1082,6 @@ local function listAvailableEggUIDs()
                 table.insert(uids, { 
                     uid = child.Name, 
                     type = eggType,
-                    mutation = mutation
-                })
-            else
-                table.insert(uids, { 
-                    uid = child.Name, 
-                    type = child.Name,
-                    mutation = nil
-                })
-            end
-        end
-    end
-    return uids
-end
-
-local function listAvailablePetUIDs()
-    local pt = getPetContainer()
-    local uids = {}
-    if not pt then return uids end
-    for _, child in ipairs(pt:GetChildren()) do
-        if #child:GetChildren() == 0 then -- no subfolder => available
-            -- Get the actual egg type from T attribute
-            local petType = child:GetAttribute("T")
-            if petType then
-                -- Get the mutation from M attribute
-                local mutation = getPetMutation(child.Name)
-                table.insert(uids, { 
-                    uid = child.Name, 
-                    type = petType,
                     mutation = mutation
                 })
             else
@@ -1996,11 +1868,9 @@ local autoBuyToggle = Tabs.AutoTab:Toggle({
 -- Auto Feed Functions moved to AutoFeedSystem.lua
 
 -- Event-driven Auto Place functionality
-local petPlaceConnections = {}
 local placeConnections = {}
 local placingInProgress = false
 local availableEggs = {} -- Track available eggs to place
-local availablePets = {} -- Track available eggs to place
 local availableTiles = {} -- Track available tiles
 local selectedEggTypes = {} -- Selected egg types for placement
 local selectedMutations = {} -- Selected mutations for placement
@@ -2047,7 +1917,7 @@ end
 local placeEggDropdown = Tabs.PlaceTab:Dropdown({
     Title = "🥚 Pick Pet Types",
     Desc = "Choose which pets to place",
-    Values = {"BasicEgg", "RareEgg", "SuperRareEgg", "EpicEgg", "LegendEgg", "PrismaticEgg", "HyperEgg", "VoidEgg", "BowserEgg", "DemonEgg","CornEgg", "BoneDragonEgg", "UltraEgg", "DinoEgg", "FlyEgg", "UnicornEgg", "AncientEgg"},
+    Values = {"BasicEgg", "RareEgg", "SuperRareEgg", "EpicEgg", "LegendEgg", "PrismaticEgg", "HyperEgg", "VoidEgg", "BowserEgg", "DemonEgg", "BoneDragonEgg", "UltraEgg", "DinoEgg", "FlyEgg", "UnicornEgg", "AncientEgg"},
     Value = {},
     Multi = true,
     AllowNone = true,
@@ -2062,30 +1932,6 @@ local placeMutationDropdown = Tabs.PlaceTab:Dropdown({
     Desc = "Choose which mutations to place (leave empty for all mutations)",
     Values = {"Golden", "Diamond", "Electric", "Fire", "Jurassic"},
     Value = {},
-    Multi = true,
-    AllowNone = true,
-    Callback = function(selection)
-        selectedMutations = selection
-    end
-})
-
--- Egg selection dropdown
-local placePetDropdown = Tabs.PlacePetTab:Dropdown({
-    Title = "🥚 Pick Pet Types",
-    Desc = "Choose which pets to place",
-    Values = Pets_InGame,
-    Multi = true,
-    AllowNone = true,
-    Callback = function(selection)
-        selectedEggTypes = selection
-    end
-})
-
--- Mutation selection dropdown for auto place
-local placePetMutationDropdown = Tabs.PlacePetTab:Dropdown({
-    Title = "🧬 Pick Mutations",
-    Desc = "Choose which mutations to place (leave empty for all mutations)",
-    Values = Mutations_InGame,
     Multi = true,
     AllowNone = true,
     Callback = function(selection)
@@ -2181,46 +2027,6 @@ local function updateAvailableEggs()
     -- Status update removed
 end
 
-local function updateAvailablePets()
-    local pets = listAvailablePetUIDs()
-    availablePets = {}
-    
-    -- Create sets for faster lookup
-    local selectedTypeSet = {}
-        for _, type in ipairs(selectedPetTypes) do
-        selectedTypeSet[type] = true
-    end
-    
-    local selectedMutationSet = {}
-    for _, mutation in ipairs(selectedMutations) do
-        selectedMutationSet[mutation] = true
-        end
-        
-        for _, petInfo in ipairs(pets) do
-        local shouldInclude = true
-        
-        -- Check egg type filter
-        if #selectedEggTypes > 0 then
-            if not selectedTypeSet[petInfo.type] then
-                shouldInclude = false
-            end
-        end
-        
-        -- Check mutation filter (only if egg type passed)
-        if shouldInclude and #selectedMutations > 0 then
-            if not petInfo.mutation or not selectedMutationSet[petInfo.mutation] then
-                shouldInclude = false
-        end
-    end
-    
-        if shouldInclude then
-            table.insert(availablePets, petInfo)
-        end
-    end
-    
-    -- Status update removed
-end
-
 -- Comprehensive tile scanning system
 local function scanAllTilesAndModels()
     local islandName = getAssignedIslandName()
@@ -2300,7 +2106,6 @@ local function scanAllTilesAndModels()
         end
     end
     
-    
     -- Count locked tiles
     local art = workspace:FindFirstChild("Art")
     if art then
@@ -2375,15 +2180,6 @@ local function cleanupPlaceConnections()
     placeConnections = {}
 end
 
-local function cleanupPetPlaceConnections()
-    for _,conn in ipairs(petPlaceConnections) do
-        pcall(function()
-            if typeof(conn) == "RBXScriptConnection" then conn:Disconnect() end
-            if type(conn) == "table" and conn.disconnect then conn.disconnect() end
-        end)
-    end
-    petPlaceConnections = {}
-end
 
 
 
@@ -2551,80 +2347,6 @@ local function placeEggInstantly(eggInfo, tileInfo)
     end
 end
 
--- ฟังก์ชันวางสัตว์ลง tile (อ้างโครงจาก placeEggInstantly)
-local function placePetInstantly(petInfo, tileInfo)
-    if not petInfo or not tileInfo then return false end
-    local petUID = petInfo.uid
-    local tilePart = tileInfo.part
-    if not petUID or not tilePart then return false end
-
-    -- เตรียมพื้นผิวบนสุดของ tile
-    local surfacePosition = Vector3.new(
-        tilePart.Position.X,
-        tilePart.Position.Y + (tilePart.Size.Y / 2), -- ด้านบนของก้อน 8x8x8
-        tilePart.Position.Z
-    )
-
-    -- (ถ้าจำเป็น) ถือ slot pet: เกมนี้ใช้ RE ฝั่ง Character เหมือนไข่
-    -- ลองใช้ keybind เดียวกับไข่ก่อน (Two = หมายเลข 2) หากเกมคุณใช้ปุ่ม/slot อื่น เปลี่ยนตรงนี้ได้
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Two, false, game)
-        task.wait(0.1)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Two, false, game)
-    end)
-
-    -- เทเลพอร์ตไป tile (ช่วยให้ place ติด)
-    local char = Players.LocalPlayer.Character
-    if char then
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            hrp.CFrame = CFrame.new(tilePart.Position)
-            task.wait(0.1)
-        end
-    end
-
-    -- คำสั่ง Place ใช้เหมือนไข่: CharacterRE "Place" พร้อม DST และ ID = ชื่อสัตว์
-    local args = {
-        "Place",
-        { DST = vector.create(surfacePosition.X, surfacePosition.Y, surfacePosition.Z), ID = petUID }
-    }
-
-    local ok = pcall(function()
-        ReplicatedStorage:WaitForChild("Remote"):WaitForChild("CharacterRE"):FireServer(unpack(args))
-    end)
-
-    -- ตรวจว่าลงจริง: มองใน workspace.Pets หาโมเดลชื่อนี้อยู่ใกล้ ๆ จุดวาง
-    task.wait(0.3)
-    local placed = false
-    local workspacePets = workspace:FindFirstChild("Pets")
-    if workspacePets then
-        local model = workspacePets:FindFirstChild(petUID)
-        if model and model:IsA("Model") then
-            local pos = model:GetPivot().Position
-            if (pos - surfacePosition).Magnitude <= 6 then
-                placed = true
-            end
-        end
-    end
-
-    -- อัปเดตรายการ
-    if placed then
-        for i, p in ipairs(availablePets) do
-            if p.uid == petUID then table.remove(availablePets, i) break end
-        end
-        for i, tile in ipairs(availableTiles) do
-            if tile.index == tileInfo.index then table.remove(availableTiles, i) break end
-        end
-        return true
-    else
-        -- ถ้าวางไม่ติด ตัด tile นี้ทิ้ง กันวนซ้ำจุดเดิม
-        for i, tile in ipairs(availableTiles) do
-            if tile.index == tileInfo.index then table.remove(availableTiles, i) break end
-        end
-        return false
-    end
-end
-
 local function attemptPlacement()
     if #availableEggs == 0 then 
         warn("Auto Place stopped: No eggs available")
@@ -2720,37 +2442,6 @@ local function attemptPlacement()
     -- Placement attempt completed
 end
 
--- วนพยายามวางสัตว์ คล้าย attemptPlacement (ของไข่)
-local function attemptPlacementPets()
-    if #availablePets == 0 then
-        warn("Auto Place Pet: No pets to place")
-        return
-    end
-    if #availableTiles == 0 then
-        warn("Auto Place Pet: No available tiles")
-        return
-    end
-
-    local attempts = 0
-    local maxAttempts = math.min(#availablePets, #availableTiles, 1) -- ทำทีละ 1 กันแลค (ปรับได้)
-    while #availablePets > 0 and #availableTiles > 0 and attempts < maxAttempts do
-        attempts += 1
-
-        -- double-check ว่า tile ยังว่าง
-        local tileInfo = availableTiles[1]
-        local stillFree = tileInfo and (not isFarmTileOccupied(tileInfo.part, 6))
-        if stillFree then
-            if placePetInstantly(availablePets[1], availableTiles[1]) then
-                task.wait(0.2)
-            else
-                task.wait(0.1)
-            end
-        else
-            table.remove(availableTiles, 1)
-        end
-    end
-end
-
 local function setupPlacementMonitoring()
     -- Monitor for new eggs in PlayerGui.Data.Egg
     local eggContainer = getEggContainer()
@@ -2814,49 +2505,6 @@ local function setupPlacementMonitoring()
     table.insert(placeConnections, { disconnect = function() updateThread = nil end })
 end
 
--- Monitoring แบบเดียวกับ eggs แต่ดู Data.Pets + workspace.Pets
-local function setupPlacementMonitoringPets()
-    -- Data.Pets เปลี่ยน (รับสัตว์เพิ่ม/ลด)
-    local petsContainer = getPetContainer()
-    if petsContainer then
-        local function onPetChanged()
-            if not autoPlacePetEnabled then return end
-            task.wait(0.2)
-            updateAvailablePets()
-            updateAvailableTiles()
-            attemptPlacementPets()
-        end
-        table.insert(petPlaceConnections, petsContainer.ChildAdded:Connect(onPetChanged))
-        table.insert(petPlaceConnections, petsContainer.ChildRemoved:Connect(onPetChanged))
-    end
-
-    -- workspace.Pets เปลี่ยน (เกิด/ย้ายออก)
-    local workspacePets = workspace:FindFirstChild("Pets")
-    if workspacePets then
-        local function onWorkspacePetsChanged()
-            if not autoPlacePetEnabled then return end
-            task.wait(0.2)
-            updateAvailableTiles()
-            -- (ไม่ต้อง updateAvailablePets ทุกครั้งก็ได้ แต่เพื่อความชัวร์)
-            updateAvailablePets()
-            attemptPlacementPets()
-        end
-        table.insert(petPlaceConnections, workspacePets.ChildAdded:Connect(onWorkspacePetsChanged))
-        table.insert(petPlaceConnections, workspacePets.ChildRemoved:Connect(onWorkspacePetsChanged))
-    end
-
-    -- อัปเดตเป็นช่วงๆ ให้ไหลลื่น
-    local thread = task.spawn(function()
-        while autoPlacePetEnabled do
-            updateAvailablePets()
-            updateAvailableTiles()
-            attemptPlacementPets()
-            task.wait(1.5)
-        end
-    end)
-    table.insert(petPlaceConnections, { disconnect = function() thread = nil end })
-end
-
 local function runAutoPlace()
     while autoPlaceEnabled do
         -- Check priority - if Auto Hatch is running and has priority, pause placing
@@ -2890,27 +2538,8 @@ local function runAutoPlace()
     cleanupPlaceConnections()
 end
 
--- รวมรันลูปอัตโนมัติของ Pets (ใช้ pattern เดียวกับ runAutoPlace)
-local function runAutoPlacePets()
-    while autoPlacePetEnabled do
-        local islandName = getAssignedIslandName()
-        if not islandName or islandName == "" then
-            task.wait(1)
-            continue
-        end
-        cleanupPetPlaceConnections()
-        setupPlacementMonitoringPets()
-        while autoPlacePetEnabled do
-            local currentIsland = getAssignedIslandName()
-            if currentIsland ~= islandName then break end
-            task.wait(0.5)
-        end
-    end
-    cleanupPetPlaceConnections()
-end
-
 local autoPlaceToggle = Tabs.PlaceTab:Toggle({
-    Title = "🏠 Auto Place Eggs",
+    Title = "🏠 Auto Place Pets",
     Desc = "Automatically places your pets on empty farm tiles!",
     Value = false,
     Callback = function(state)
@@ -2936,42 +2565,7 @@ local autoPlaceToggle = Tabs.PlaceTab:Toggle({
                 runAutoPlace()
                 autoPlaceThread = nil
             end)
-            WindUI:Notify({ Title = "🏠 Auto Place", Content = "Started - Placing Eggs automatically! 🎉", Duration = 3 })
-        elseif (not state) and autoPlaceThread then
-            cleanupPlaceConnections()
-            WindUI:Notify({ Title = "🏠 Auto Place", Content = "Stopped", Duration = 3 })
-        end
-    end
-})
-
-local autoPlacePetToggle = Tabs.PlacePetTab:Toggle({
-    Title = "🏠 Auto Place Pet",
-    Desc = "Automatically places your pets on empty farm tiles!",
-    Value = false,
-    Callback = function(state)
-        autoPlacePetEnabled = state
-        
-        waitForSettingsReady(0.2)
-        -- Re-sync filters at the moment auto place is toggled to on
-        if state then
-            syncAutoPlaceFiltersFromUI()
-            -- Prime available lists and try an immediate placement
-            pcall(function()
-                updateAvailablePets()
-                updateAvailableTiles()
-                attemptPlacementPets()
-            end)
-        end
-        if state and not autoPlaceThread then
-            -- Check if Auto Hatch is running and we have lower priority
-            -- Priority system removed
-            -- Reset counters
-            
-            autoPlaceThread = task.spawn(function()
-                runAutoPlacePets()
-                autoPlaceThread = nil
-            end)
-            WindUI:Notify({ Title = "🏠 Auto Place", Content = "Started - Placing Eggs automatically! 🎉", Duration = 3 })
+            WindUI:Notify({ Title = "🏠 Auto Place", Content = "Started - Placing pets automatically! 🎉", Duration = 3 })
         elseif (not state) and autoPlaceThread then
             cleanupPlaceConnections()
             WindUI:Notify({ Title = "🏠 Auto Place", Content = "Stopped", Duration = 3 })
@@ -3886,7 +3480,6 @@ local function registerUIElements()
     registerIfExists("autoHatchEnabled", autoHatchToggle)
     registerIfExists("autoClaimEnabled", autoClaimToggle)
     registerIfExists("autoPlaceEnabled", autoPlaceToggle)
-    registerIfExists("autoPlacePetEnabled", autoPlacePetToggle)
     registerIfExists("autoUnlockEnabled", autoUnlockToggle)
     registerIfExists("autoDeleteEnabled", autoDeleteToggle)
     registerIfExists("autoDinoEnabled", autoDinoToggle)
