@@ -11,11 +11,12 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local vector = { create = function(x, y, z) return Vector3.new(x, y, z) end }
 local LocalPlayer = Players.LocalPlayer
+local InGameConfig = ReplicatedStorage:WaitForChild("Config")
 local Eggs_InGame = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
 local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
 local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
 local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
-local InGameConfig = ReplicatedStorage:WaitForChild("Config")
+
 -- Selection state variables
 local selectedTypeSet = {}
 local selectedMutationSet = {}
