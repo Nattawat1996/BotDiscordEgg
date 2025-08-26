@@ -1,19 +1,21 @@
 local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
--- ===== KEY GATE CORE =====
-getgenv().OnKeyVerified = getgenv().OnKeyVerified or {}   -- callback list
-getgenv().BOTZOO_KEY_OK = getgenv().BOTZOO_KEY_OK or false
+-- ====== KEY STATE ======
+getgenv().BOTZOO_KEY_OK  = getgenv().BOTZOO_KEY_OK or false
+getgenv().OnKeyVerified  = getgenv().OnKeyVerified or {}
 
 local function fireVerified()
     getgenv().BOTZOO_KEY_OK = true
-    -- เรียก callback ที่รอไว้ทั้งหมด แล้วล้างคิว
-    for _,fn in ipairs(getgenv().OnKeyVerified) do
-        pcall(fn)
+    -- ยิง callback ทั้งหมดที่รอไว้
+    for _, fn in ipairs(getgenv().OnKeyVerified) do
+        task.spawn(function()
+            local ok, err = pcall(fn)
+            if not ok then warn("[KeyGate] Start callback error:", err) end
+        end)
     end
     table.clear(getgenv().OnKeyVerified)
 end
-
 -- === ตั้งค่าคีย์ ===
 local USE_REMOTE_KEYS = true
 local REMOTE_KEY_URL  = "https://raw.githubusercontent.com/Nattawat1996/BotDiscordEgg/refs/heads/main/key.txt"
@@ -52,29 +54,21 @@ local function checkKeyRemote(k)
     return false, "คีย์ไม่ถูกต้อง"
 end
 
--- ===== Compatible notify helper =====
+-- ====== NOTIFY HELPERS (กันหลายเวอร์ชัน) ======
 local function notify(title, content, duration)
     duration = duration or 3
-    -- 1) Fluent มักมี Notify บนตัว lib
-    if typeof(Fluent) == "table" and typeof(Fluent.Notify) == "function" then
-        return Fluent:Notify({ Title = title, Content = content, Duration = duration })
+    if typeof(Fluent)=="table" and typeof(Fluent.Notify)=="function" then
+        return Fluent:Notify({Title=title, Content=content, Duration=duration})
     end
-    -- 2) บางฟอร์กผูกไว้กับ InterfaceManager
-    if typeof(InterfaceManager) == "table" and typeof(InterfaceManager.Notify) == "function" then
-        return InterfaceManager:Notify({ Title = title, Content = content, Duration = duration })
+    if typeof(InterfaceManager)=="table" and typeof(InterfaceManager.Notify)=="function" then
+        return InterfaceManager:Notify({Title=title, Content=content, Duration=duration})
     end
-    -- 3) บางเวอร์ชันอยู่บน Window (เผื่อไว้)
-    if typeof(Window) == "table" and typeof(Window.Notify) == "function" then
-        return Window:Notify({ Title = title, Content = content, Duration = duration })
-    end
-    -- 4) fallback เงียบ ๆ
     print(("[Notify] %s | %s"):format(title, content))
 end
 
--- === หน้าต่างกรอกคีย์ (ใช้ Fluent ที่คุณโหลดอยู่แล้ว) ===
-local function showKeyGateAndWait()
-    if getgenv().BOTZOO_KEY_OK then return end -- เผื่อกดย้ำ
 
+-- ====== UI ======
+local function showKeyGateAndWait()
     local Window = Fluent:CreateWindow({
         Title = "🔑 BotZoo | Key System",
         SubTitle = "กรอกคีย์เพื่อเข้าใช้งาน",
@@ -84,42 +78,39 @@ local function showKeyGateAndWait()
         Theme = "Dark",
         MinimizeKey = Enum.KeyCode.LeftControl
     })
-    
-    local Tabs = { Key = Window:AddTab({ Title = "Key", Icon = "lock" }) }
-    Tabs.Key:AddParagraph({ Title = "HWID (สำหรับผูกคีย์)", Content = getHWID() })
+    local Tabs = { Key = Window:AddTab({ Title="Key", Icon="lock" }) }
+
+    Tabs.Key:AddParagraph({ Title="HWID (สำหรับผูกคีย์)", Content=(pcall(function()
+        return game:GetService("RbxAnalyticsService"):GetClientId()
+    end)) and select(2, pcall(function() return game:GetService("RbxAnalyticsService"):GetClientId() end)) or "UNKNOWN_HWID" })
 
     local userKey = ""
     Tabs.Key:AddInput("key_input", {
-        Title = "ใส่คีย์ของคุณ", Placeholder = "วางคีย์ที่นี่",
-        Callback = function(v) userKey = tostring(v or "") end
+        Title="ใส่คีย์ของคุณ", Placeholder="วางคีย์ที่นี่",
+        Callback=function(v) userKey = tostring(v or "") end
     })
 
+    local function onVerified()
+        notify("✅ สำเร็จ","คีย์ถูกต้อง! กำลังเปิดใช้งาน...",2)
+        -- <<< สำคัญ: ยิงก่อน แล้วค่อยปิดหน้าต่าง
+        fireVerified()
+        task.defer(function() pcall(function() Window:Destroy() end) end)
+    end
+
     Tabs.Key:AddButton({
-        Title = "ยืนยันคีย์",
-        Description = "ตรวจสอบและเข้าใช้งาน",
-        Callback = function()
-            if userKey == "" then
+        Title="ยืนยันคีย์",
+        Description="ตรวจสอบและเข้าใช้งาน",
+        Callback=function()
+            if userKey=="" then
                 return notify("❗️กรุณาใส่คีย์","ช่องคีย์ยังว่างอยู่",3)
             end
             local ok, msg
             if USE_REMOTE_KEYS then ok, msg = checkKeyRemote(userKey) else ok = checkKeyLocal(userKey) end
             if ok then
-                notify("✅ สำเร็จ","คีย์ถูกต้อง! กำลังเปิดใช้งาน...",3)
-                task.delay(0.15, function()
-                    pcall(function() Window:Destroy() end)
-                    fireVerified()  -- <<< จุดสำคัญ: สตาร์ทโค้ดหลักที่รออยู่ทันที
-                end)
+                onVerified()   -- <<< ตรงนี้จะไปสตาร์ทบอท
             else
-                notify("⛔️ ไม่ผ่าน", errMsg or "คีย์ไม่ถูกต้อง", 4)
+                notify("⛔️ ไม่ผ่าน", msg or "คีย์ไม่ถูกต้อง",3)
             end
-        end
-    })
-
-    Tabs.Key:AddButton({
-        Title = "คัดลอก HWID",
-        Callback = function()
-            setclipboard(getHWID())
-            notify("📋 คัดลอกแล้ว","คัดลอก HWID ไปยังคลิปบอร์ด",2)
         end
     })
 end
@@ -1036,9 +1027,10 @@ local function StartBot()
         end
 end
 
--- 2) ผูกการเรียกใช้งาน:
 if getgenv().BOTZOO_KEY_OK then
-    task.defer(StartBot)
+    task.defer(StartBot)                                   -- ถ้าเคยผ่านแล้วใน session นี้
 else
-    table.insert(getgenv().OnKeyVerified, StartBot)
+    table.insert(getgenv().OnKeyVerified, StartBot)        -- รอคีย์ผ่านแล้วค่อยเริ่ม
+    showKeyGateAndWait()                                   -- แสดงหน้าต่างคีย์
 end
+
