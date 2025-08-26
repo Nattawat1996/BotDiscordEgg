@@ -75,9 +75,7 @@ local function showKeyGateAndWait()
         Title = "🔑 BotZoo | Key System",
         SubTitle = "กรอกคีย์เพื่อเข้าใช้งาน",
         TabWidth = 140,
-        -- Size = UDim2.fromOffset(560, 420),
-        SizeX = 560,
-        SizeY = 420,
+        Size = UDim2.fromOffset(560, 420),
         Acrylic = true,
         Theme = "Dark",
         MinimizeKey = Enum.KeyCode.LeftControl
@@ -358,9 +356,7 @@ local function StartBot()
             Title = GameName,
             SubTitle = "by Demigodz",
             TabWidth = 160,
-            -- Size = UDim2.fromOffset(522, 414),
-            SizeX = 522,
-            SizeY = 414,
+            Size = UDim2.fromOffset(522, 414),
             Acrylic = true,
             Theme = "Dark",
             MinimizeKey = Enum.KeyCode.LeftControl
