@@ -221,7 +221,7 @@ if game.PlaceId == 105555311806207 then
     
     local Window = Fluent:CreateWindow({
         Title = GameName,
-        SubTitle = "by Meowy",
+        SubTitle = "by DemiGodz",
         TabWidth = 160,
         Size = UDim2.fromOffset(522, 414),
         Acrylic = true,
@@ -662,7 +662,7 @@ if game.PlaceId == 105555311806207 then
         -- \\ About Tab // --
         Tabs.About:AddParagraph({
             Title = "Credit",
-            Content = "Script create by Meowy / godyt_2.0"
+            Content = "Script create by DemiGodz"
         })
         -- \\ Settings Tab // --
         local AntiAFK_Toggle = Tabs.Settings:AddToggle("AntiAFK",{
