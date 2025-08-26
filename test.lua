@@ -113,6 +113,13 @@ local function showKeyGateAndWait()
             end
         end
     })
+    Tabs.Key:AddButton({
+        Title = "คัดลอก HWID",
+        Callback = function()
+            setclipboard(getHWID())
+            Fluent:Notify({ Title = "📋 คัดลอกแล้ว", Content = "คัดลอก HWID ไปยังคลิปบอร์ด", Duration = 2 })
+        end
+    })
 end
 
 -- เรียก Key UI ถ้ายังไม่ผ่าน
