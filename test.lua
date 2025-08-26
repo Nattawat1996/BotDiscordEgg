@@ -59,10 +59,14 @@ local function showKeyGateAndWait()
     local Window = Fluent:CreateWindow({
         Title = "🔑 BotZoo | Key System",
         SubTitle = "กรอกคีย์เพื่อเข้าใช้งาน",
-        Size = UDim2.fromOffset(520, 360),
-        Acrylic = true, Theme = "Dark",
+        TabWidth = 160,          -- คงเป็นตัวเลข
+        SizeX = 560,             -- แทน Size = UDim2.fromOffset(560, 420)
+        SizeY = 420,             -- ↑ ใช้แบบตัวเลขให้ตรงกับ lib
+        Acrylic = true,
+        Theme = "Dark",
         MinimizeKey = Enum.KeyCode.LeftControl
     })
+    
     local Tabs = { Key = Window:AddTab({ Title = "Key", Icon = "lock" }) }
     Tabs.Key:AddParagraph({ Title = "HWID (สำหรับผูกคีย์)", Content = getHWID() })
 
@@ -1016,9 +1020,7 @@ end
 
 -- 2) ผูกการเรียกใช้งาน:
 if getgenv().BOTZOO_KEY_OK then
-    -- ผ่านคีย์แล้ว (เช่น เคยผ่านครั้งก่อนใน session เดียว) -> เริ่มเลย
     task.defer(StartBot)
 else
-    -- ยังไม่ผ่าน -> ฝากไว้ในคิว ให้ Key Gate ยิงเรียกทันทีที่กด Verify ผ่าน
     table.insert(getgenv().OnKeyVerified, StartBot)
 end
