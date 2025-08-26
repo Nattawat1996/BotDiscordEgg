@@ -1,3 +1,6 @@
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 -- ===== KEY GATE CORE =====
 getgenv().OnKeyVerified = getgenv().OnKeyVerified or {}   -- callback list
 getgenv().BOTZOO_KEY_OK = getgenv().BOTZOO_KEY_OK or false
@@ -112,9 +115,7 @@ local function StartBot()
             MeowyBuildAZoo:Destroy()
         end
         repeat task.wait(1) until game:IsLoaded()
-        local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-        local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
-        local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
         
         local RunningEnvirontments = true
         local GameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)["Name"] or "None"
