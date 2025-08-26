@@ -795,7 +795,7 @@ local function StartBot()
             -- \\ About Tab // --
             Tabs.About:AddParagraph({
                 Title = "Credit",
-                Content = "Script create by Meowy / godyt_2.0"
+                Content = "Script create by DemiGodz"
             })
             -- \\ Settings Tab // --
             local AntiAFK_Toggle = Tabs.Settings:AddToggle("AntiAFK",{
