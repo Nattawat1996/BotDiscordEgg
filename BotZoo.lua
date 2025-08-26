@@ -6,10 +6,10 @@ if game.PlaceId == 105555311806207 then
     local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
     local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
     local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
-    
+
     local RunningEnvirontments = true
     local GameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)["Name"] or "None"
-    
+
     local EnvirontmentConnections = {}
     local Players = game:GetService("Players")
     local Player = Players.LocalPlayer
@@ -28,41 +28,42 @@ if game.PlaceId == 105555311806207 then
     local ServerReplicatedDict = ReplicatedStorage:WaitForChild("ServerDictReplicated")
     local OwnedPetData = Data:WaitForChild("Pets")
     local OwnedEggData = Data:WaitForChild("Egg")
-    
+
+    -- helper ให้เข้ากับ signature ของ Place
+    local vector = { create = function(x,y,z) return Vector3.new(x,y,z) end }
+
     local Eggs_InGame = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
     local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
     local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
     local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
+
+    -- เก็บกริดฟาร์ม
     local Grids = {}
-    for _,grid in pairs(Island:GetChildren()) do
-        if grid:IsA("BasePart") and string.find(tostring(grid),"Farm") then
-            table.insert(Grids,{GridCoord = grid:GetAttribute("IslandCoord"),GridPos = grid.CFrame.Position})
+    for _,grid in pairs(Island:GetDescendants()) do
+        if grid:IsA("BasePart") and string.find(tostring(grid), "Farm") then
+            table.insert(Grids, {
+                GridCoord = grid:GetAttribute("IslandCoord"),
+                GridPos = grid.Position
+            })
         end
     end
-    
-    local EventTaskData;
-    local ResEvent;
-    local EventName = "None";
+
+    -- Event data
+    local EventTaskData; local ResEvent; local EventName = "None";
     for _,Data_Folder in pairs(Data:GetChildren()) do
         local IsEventTaskData = (tostring(Data_Folder):match("^(.*)EventTaskData$"))
-        if IsEventTaskData then
-            EventTaskData = Data_Folder
-            break
-        end
+        if IsEventTaskData then EventTaskData = Data_Folder break end
     end
     for _,v in pairs(ReplicatedStorage:GetChildren()) do
         local IsEventData = (tostring(v):match("^(.*)Event$"))
-        if IsEventData then
-            ResEvent = v
-            EventName = IsEventData
-            break
-        end
+        if IsEventData then ResEvent = v EventName = IsEventData break end
     end
+
     local InventoryData = Data:WaitForChild("Asset",30)
     local Players_List_Updated = Instance.new("BindableEvent")
     table.insert(EnvirontmentConnections,Players.PlayerRemoving:Connect(function(plr)
-        local plr = table.find(Players_InGame,plr.Name)
-        if plr then table.remove(Players_InGame,plr) end
+        local idx = table.find(Players_InGame,plr.Name)
+        if idx then table.remove(Players_InGame,idx) end
         Players_List_Updated:Fire(Players_InGame)
     end))
     table.insert(EnvirontmentConnections,Players.PlayerAdded:Connect(function(plr)
@@ -70,41 +71,44 @@ if game.PlaceId == 105555311806207 then
         Players_List_Updated:Fire(Players_InGame)
     end))
     for _,plr in pairs(Players:GetPlayers()) do
-        --if plr == Player then continue end
         table.insert(Players_InGame,plr.Name)
     end
-    
+
     local OwnedPets = {}
     local Egg_Belt = {}
     table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildRemoved:Connect(function(egg)
         task.wait(0.1)
         local eggUID = tostring(egg) or "None"
-        if egg and Egg_Belt[eggUID] then
-            Egg_Belt[eggUID] = nil
-        end
+        if egg and Egg_Belt[eggUID] then Egg_Belt[eggUID] = nil end
     end))
     table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildAdded:Connect(function(egg)
         task.wait(0.1)
         local eggUID = tostring(egg) or "None"
         if egg then
-            Egg_Belt[eggUID] = {UID = eggUID,Mutate = (egg:GetAttribute("M") or "None"),Type = (egg:GetAttribute("T") or "BasicEgg")}
+            Egg_Belt[eggUID] = {
+                UID = eggUID,
+                Mutate = (egg:GetAttribute("M") or "None"),
+                Type = (egg:GetAttribute("T") or "BasicEgg")
+            }
         end
     end))
     for _,egg in pairs(Egg_Belt_Folder:GetChildren()) do
         task.spawn(pcall,function()
             local eggUID = tostring(egg) or "None"
             if egg then
-                Egg_Belt[eggUID] = {UID = eggUID,Mutate = (egg:GetAttribute("M") or "None"),Type = (egg:GetAttribute("T") or "BasicEgg")}
+                Egg_Belt[eggUID] = {
+                    UID = eggUID,
+                    Mutate = (egg:GetAttribute("M") or "None"),
+                    Type = (egg:GetAttribute("T") or "BasicEgg")
+                }
             end
         end)
     end
-    
+
     table.insert(EnvirontmentConnections,Pet_Folder.ChildRemoved:Connect(function(pet)
         task.wait(0.1)
         local petUID = tostring(pet) or "None"
-        if pet and OwnedPets[petUID] then
-            OwnedPets[petUID] = nil
-        end
+        if pet and OwnedPets[petUID] then OwnedPets[petUID] = nil end
     end))
     local function GetCash(TXT)
         if TXT then
@@ -113,31 +117,8 @@ if game.PlaceId == 105555311806207 then
         end
         return 0
     end
-    local function GetFreeGrid()
-        local occupiedGrids = {}
-        for _, pet in pairs(Pets) do
-            if pet.GridCoord then
-                local key = pet.GridCoord.X .. "," .. pet.GridCoord.Z
-                occupiedGrids[key] = true
-            end
-        end
-        for _, egg in pairs(Eggs) do
-            if egg.GridCoord then
-                local key = egg.GridCoord.X .. "," .. egg.GridCoord.Z
-                occupiedGrids[key] = true
-            end
-        end
-        for index, gridData in pairs(Grids) do
-            if gridData.GridCoord then
-                local key = gridData.GridCoord.X .. "," .. gridData.GridCoord.Z
-                if not occupiedGrids[key] then
-                    return gridData.GridPos, index
-                end
-            end
-        end
-        
-        return nil
-    end
+
+    -- Map OwnedPets พร้อม ProduceSpeed
     table.insert(EnvirontmentConnections,Pet_Folder.ChildAdded:Connect(function(pet)
         task.wait(0.1)
         local petUID = tostring(pet) or "None"
@@ -149,9 +130,24 @@ if game.PlaceId == 105555311806207 then
         local CashTXT = CashFrame and (CashFrame:FindFirstChild("TXT") or CashFrame:WaitForChild("TXT"))
         local GridCoord = OwnedPetData and OwnedPetData:WaitForChild(petUID):WaitForChild("DI")
         GridCoord = GridCoord and Vector3.new(GridCoord:GetAttribute("X"),GridCoord:GetAttribute("Y"),GridCoord:GetAttribute("Z")) or nil
-        if pet and pet:GetAttribute("UserId") == PlayerUserID then
-            if not petPrimaryPart then petPrimaryPart = pet.PrimaryPart or pet:FindFirstChild("RootPart") or pet:WaitForChild("RootPart") end
-            OwnedPets[petUID] = setmetatable({GridCoord = GridCoord,UID = petUID,Type = (petPrimaryPart:GetAttribute("Type")),Mutate = (petPrimaryPart:GetAttribute("Mutate")),Model = pet,RootPart = (petPrimaryPart),RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true)),IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))},{__index = (function(tb,ind) if ind == "Coin" then return (CashTXT and GetCash(CashTXT.Text)) end return rawget(tb,ind) end)})
+        if pet and IsOwned then
+            OwnedPets[petUID] = setmetatable({
+                GridCoord = GridCoord, UID = petUID,
+                Type = (petPrimaryPart:GetAttribute("Type")),
+                Mutate = (petPrimaryPart:GetAttribute("Mutate")),
+                Model = pet, RootPart = petPrimaryPart,
+                RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true)),
+                IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))
+            },{
+                __index = (function(tb, ind)
+                    if ind == "Coin" then
+                        return (CashTXT and GetCash(CashTXT.Text))
+                    elseif ind == "ProduceSpeed" or ind == "PS" then
+                        return (petPrimaryPart and petPrimaryPart:GetAttribute("ProduceSpeed")) or 0
+                    end
+                    return rawget(tb, ind)
+                end)
+            })
         end
     end))
     for _,pet in pairs(Pet_Folder:GetChildren()) do
@@ -165,70 +161,58 @@ if game.PlaceId == 105555311806207 then
             local CashTXT = CashFrame and (CashFrame:FindFirstChild("TXT") or CashFrame:WaitForChild("TXT"))
             local GridCoord = OwnedPetData and OwnedPetData:WaitForChild(petUID):WaitForChild("DI")
             GridCoord = GridCoord and Vector3.new(GridCoord:GetAttribute("X"),GridCoord:GetAttribute("Y"),GridCoord:GetAttribute("Z")) or nil
-            if pet and IsOwned then
-                OwnedPets[petUID] = setmetatable({GridCoord = GridCoord,UID = petUID,Type = (petPrimaryPart:GetAttribute("Type")),Mutate = (petPrimaryPart:GetAttribute("Mutate")),Model = pet,RootPart = (petPrimaryPart),RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true)),IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))},{__index = (function(tb,ind) if ind == "Coin" then return (CashTXT and GetCash(CashTXT.Text)) end return rawget(tb,ind) end)})
-            end
+            OwnedPets[petUID] = setmetatable({
+                GridCoord = GridCoord, UID = petUID,
+                Type = (petPrimaryPart:GetAttribute("Type")),
+                Mutate = (petPrimaryPart:GetAttribute("Mutate")),
+                Model = pet, RootPart = petPrimaryPart,
+                RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true)),
+                IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))
+            },{
+                __index = (function(tb, ind)
+                    if ind == "Coin" then
+                        return (CashTXT and GetCash(CashTXT.Text))
+                    elseif ind == "ProduceSpeed" or ind == "PS" then
+                        return (petPrimaryPart and petPrimaryPart:GetAttribute("ProduceSpeed")) or 0
+                    end
+                    return rawget(tb, ind)
+                end)
+            })
         end)
     end
-    
+
     local Configuration = {
         Main = {
-            AutoCollect = false,
-            Collect_Delay = 5,
+            AutoCollect = false, Collect_Delay = 5,
             Collect_Type = "Delay",
             Collect_Between = {["Min"] = 100000,["Max"] = 1000000},
         },
         Pet = {
-            AutoFeed = false,
-            AutoFeed_Foods = {},
-            AutoFeed_Delay = 3,
-            AutoFeed_Type = "",
-            CollectPet_Type = "All",
-            CollectPet_Auto = false,
-            CollectPet_Mutations = {},
-            CollectPet_Pets = {},
+            AutoFeed = false, AutoFeed_Foods = {},
+            AutoFeed_Delay = 3, AutoFeed_Type = "",
+            CollectPet_Type = "All", CollectPet_Auto = false,
+            CollectPet_Mutations = {}, CollectPet_Pets = {},
             CollectPet_Delay = 5,
+            CollectPet_Between = {["Min"] = 100000,["Max"] = 1000000},
         },
         Egg = {
-            AutoHatch = false,
-            Hatch_Delay = 15,
-            AutoBuyEgg = false,
-            AutoBuyEgg_Delay = 1,
-            Mutations = {},
-            Types = {},
+            AutoHatch = false, Hatch_Delay = 15,
+            AutoBuyEgg = false, AutoBuyEgg_Delay = 1,
+            AutoPlaceEgg = false, AutoPlaceEgg_Delay = 1.0,
+            Mutations = {}, Types = {},
         },
-        Shop = {
-            Food = {
-                AutoBuy = false,
-                AutoBuy_Delay = 1,
-                Foods = {},
-            },
-        },
-        Players = {
-            SelectPlayer = "",
-            SelectType = "",
-            SendPet_Type = "All",
-            Pet_Type = {},
-            Pet_Mutations = {},
-        },
-        Event = {
-            AutoClaim = false,
-            AutoClaim_Delay = 3,
-        },
-        AntiAFK = false,
-        Waiting = false,
+        Shop = { Food = { AutoBuy = false, AutoBuy_Delay = 1, Foods = {} } },
+        Players = { SelectPlayer = "", SelectType = "", SendPet_Type = "All", Pet_Type = {}, Pet_Mutations = {} },
+        Event = { AutoClaim = false, AutoClaim_Delay = 3 },
+        AntiAFK = false, Waiting = false,
     }
-    
+
     local Window = Fluent:CreateWindow({
-        Title = GameName,
-        SubTitle = "by DemiGodz",
-        TabWidth = 160,
-        Size = UDim2.fromOffset(522, 414),
-        Acrylic = true,
-        Theme = "Dark",
-        MinimizeKey = Enum.KeyCode.LeftControl
+        Title = GameName, SubTitle = "by DemiGodz",
+        TabWidth = 160, Size = UDim2.fromOffset(522, 414),
+        Acrylic = true, Theme = "Dark", MinimizeKey = Enum.KeyCode.LeftControl
     })
-    
+
     local Tabs = {
         About = Window:AddTab({ Title = "About", Icon = "" }),
         Main = Window:AddTab({ Title = "Main Features", Icon = "" }),
@@ -239,464 +223,202 @@ if game.PlaceId == 105555311806207 then
         Players = Window:AddTab({ Title = "Players Features", Icon = "" }),
         Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
     }
-    
+
     local Options = Fluent.Options
-    
-    do  
-        -- \\ Main Tab // --
+
+    do
+        -- Main
         Tabs.Main:AddSection("Main")
-        local AutoCollect_Toggle = Tabs.Main:AddToggle("AutoCollect",{
-            Title = "Auto Collect",
-            Default = false,
-            Callback = function(Value)
-                Configuration.Main.AutoCollect = Value
-            end})
+        Tabs.Main:AddToggle("AutoCollect",{ Title = "Auto Collect", Default = false, Callback = function(v) Configuration.Main.AutoCollect = v end })
         Tabs.Main:AddSection("Settings")
-        local AutoCollect_Delay = Tabs.Main:AddSlider("AutoCollect Delay", {
-            Title = "Collect Delay",
-            Description = "Set Collect Delay",
-            Default = 5,
-            Min = 1,
-            Max = 30,
-            Rounding = 0,
-            Callback = function(Value)
-                Configuration.Main.Collect_Delay = Value
-            end
-        })
-        Tabs.Main:AddDropdown("CollectCash Type", {
-            Title = "Select Type",
-            Values = {"Delay","Between"},
-            Multi = false,
-            Default = "Delay",
-            Callback = function(Value)
-                Configuration.Main.Collect_Type = Value
-            end,
-        })
-        Tabs.Main:AddInput("CollectCash_Num1", {
-            Title = "Min Coin",
-            Default = 100000,
-            Placeholder = "Input Number",
-            Numeric = true, -- Only allows numbers
-            Finished = false, -- Only calls callback when you press enter
-            Callback = function(Value)
-                Configuration.Main.Collect_Between["Min"] = tonumber(Value)
-            end
-        })
-        Tabs.Main:AddInput("CollectCash_Num2", {
-            Title = "Max Coin",
-            Default = 1000000,
-            Placeholder = "Input Number",
-            Numeric = true, -- Only allows numbers
-            Finished = false, -- Only calls callback when you press enter
-            Callback = function(Value)
-                Configuration.Main.Collect_Between["Max"] = tonumber(Value)
-            end
-        })
-        -- \\ Pet Tab // --
+        Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 5, Min = 1, Max = 30, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
+        Tabs.Main:AddDropdown("CollectCash Type",{ Title = "Select Type", Values = {"Delay","Between"}, Multi = false, Default = "Delay", Callback = function(v) Configuration.Main.Collect_Type = v end })
+        Tabs.Main:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Min = tonumber(v) end })
+        Tabs.Main:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Max = tonumber(v) end })
+
+        -- Pet
         Tabs.Pet:AddSection("Main")
-        local AutoFeed_Toggle = Tabs.Pet:AddToggle("Auto Feed",{
-            Title = "Auto Feed",
-            Default = false,
-            Callback = function(Value)
-                Configuration.Pet.AutoFeed = Value
-            end})
-        local AutoCollectPet_Toggle = Tabs.Pet:AddToggle("Auto Collect Pet",{
-            Title = "Auto Collect Pet",
-            Description = "Auto Collect Pet with selected type (All Pet Type will not work with this)",
-            Default = false,
-            Callback = function(Value)
-                Configuration.Pet.CollectPet_Auto = Value
-            end})
+        Tabs.Pet:AddToggle("Auto Feed",{ Title = "Auto Feed", Default = false, Callback = function(v) Configuration.Pet.AutoFeed = v end })
+        Tabs.Pet:AddToggle("Auto Collect Pet",{ Title = "Auto Collect Pet", Default = false, Callback = function(v) Configuration.Pet.CollectPet_Auto = v end })
         Tabs.Pet:AddButton({
             Title = "Collect Pet",
-            Description = "Collect Pets with Collect Pet Type (this will not collect big pet)",
+            Description = "Collect Pets with Collect Pet Type (no BIG pet)",
             Callback = function()
                 Window:Dialog({
-                    Title = "Collect Pet Alert",
-                    Content = "Are you sure?",
+                    Title = "Collect Pet Alert", Content = "Are you sure?",
                     Buttons = {
-                        {
-                            Title = "Yes",
-                            Callback = function()
-                                local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
-                                local CollectType = Configuration.Pet.CollectPet_Type
-                                if CollectType == "All" then
-                                    for UID,PetData in pairs(OwnedPets) do
-                                        if PetData and not PetData.IsBig then
-                                            if PetData.RE then PetData.RE:FireServer("Claim") end
-                                            CharacterRE:FireServer("Del",UID)
-                                        end
+                        { Title = "Yes", Callback = function()
+                            local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
+                            local CollectType = Configuration.Pet.CollectPet_Type
+                            if CollectType == "All" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
                                     end
-                                elseif CollectType == "Match Pet" then
-                                    for UID,PetData in pairs(OwnedPets) do
-                                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] then
-                                            if PetData.RE then PetData.RE:FireServer("Claim") end
-                                            CharacterRE:FireServer("Del",UID)
-                                        end
+                                end
+                            elseif CollectType == "Match Pet" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
                                     end
-                                elseif CollectType == "Match Mutation" then
-                                    for UID,PetData in pairs(OwnedPets) do
-                                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                                            if PetData.RE then PetData.RE:FireServer("Claim") end
-                                            CharacterRE:FireServer("Del",UID)
-                                        end
+                                end
+                            elseif CollectType == "Match Mutation" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
                                     end
-                                elseif CollectType == "Match Pet&Mutation" then
-                                    for UID,PetData in pairs(OwnedPets) do
-                                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                end
+                            elseif CollectType == "Match Pet&Mutation" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
+                                    end
+                                end
+                            elseif CollectType == "Range" then
+                                local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
+                                local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
+                                for UID, PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig then
+                                        local ps = tonumber(PetData.ProduceSpeed) or 0
+                                        if ps >= minV and ps <= maxV then
                                             if PetData.RE then PetData.RE:FireServer("Claim") end
-                                            CharacterRE:FireServer("Del",UID)
+                                            CharacterRE:FireServer("Del", UID)
                                         end
                                     end
                                 end
                             end
-                        },
-                        {
-                            Title = "No",
-                            Callback = function()
-                                
-                            end
-                        }
+                        end },
+                        { Title = "No", Callback = function() end }
                     }
                 })
             end
         })
         Tabs.Pet:AddSection("Settings")
-        Tabs.Pet:AddSlider("AutoFeed Delay", {
-            Title = "Feed Delay",
-            Description = "Set Feed Delay",
-            Default = 3,
-            Min = 3,
-            Max = 30,
-            Rounding = 0,
-            Callback = function(Value)
-                Configuration.Pet.AutoFeed_Delay = Value
-            end
-        })
-        local AutoHatch_Delay = Tabs.Pet:AddSlider("AutoCollectPet Delay", {
-            Title = "Auto Collect Pet Delay",
-            Description = "Set Auto Collect Pet Delay",
-            Default = 5,
-            Min = 5,
-            Max = 60,
-            Rounding = 0,
-            Callback = function(Value)
-                Configuration.Pet.CollectPet_Delay = Value
-            end
-        })
-        Tabs.Pet:AddDropdown("Pet Feed_Type", {
-            Title = "Select Type",
-            Values = {"BestFood","SelectFood"},
-            Multi = false,
-            Default = "",
-            Callback = function(Value)
-                Configuration.Pet.AutoFeed_Type = Value
-            end,
-        })
-        Tabs.Pet:AddDropdown("Pet Feed_Food", {
-            Title = "Select Foods",
-            Values = PetFoods_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Pet.AutoFeed_Foods = Value
-            end,
-        })
-        Tabs.Pet:AddDropdown("CollectPet Type", {
-            Title = "Collect Pet Type",
-            Description = "Select Collect Pet Type for Auto/Manual Collect Pet and Collect Pet",
-            Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation"},
-            Multi = false,
-            Default = "All",
-            Callback = function(Value)
-                Configuration.Pet.CollectPet_Type = Value
-            end,
-        })
-        Tabs.Pet:AddDropdown("CollectPet Pets", {
-            Title = "Collect Pets",
-            Description = "Collect Specific Pets for Auto/Manual Collect Pet",
-            Values = Pets_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Pet.CollectPet_Pets = Value
-            end,
-        })
-        Tabs.Pet:AddDropdown("CollectPet Mutations", {
-            Title = "Collect Mutations",
-            Description = "Collect Pets with Specific Mutations for Auto/Manual Collect Pet",
-            Values = Mutations_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Pet.CollectPet_Mutations = Value
-            end,
-        })
-    
-        -- \\ Egg Tab // --
-        local EggTabMain = Tabs.Egg:AddSection("Main")
-        local AutoHatch_Toggle = Tabs.Egg:AddToggle("Auto Hatch",{
-            Title = "Auto Hatch",
-            Default = false,
-            Callback = function(Value)
-                Configuration.Egg.AutoHatch = Value
-            end})
-        local AutoBuyEgg_Toggle = Tabs.Egg:AddToggle("Auto Egg",{
-            Title = "Auto Buy Egg",
-            Default = false,
-            Callback = function(Value)
-                Configuration.Egg.AutoBuyEgg = Value
-            end})
-        local EggTabSettings = Tabs.Egg:AddSection("Settings")
-        local AutoHatch_Delay = Tabs.Egg:AddSlider("AutoHatch Delay", {
-            Title = "Hatch Delay",
-            Description = "Set Auto Hatch Delay",
-            Default = 15,
-            Min = 15,
-            Max = 60,
-            Rounding = 0,
-            Callback = function(Value)
-                Configuration.Egg.Hatch_Delay = Value
-            end
-        })
-        local AutoBuyEgg_Delay = Tabs.Egg:AddSlider("AutoBuyEgg Delay", {
-            Title = "Auto Buy Egg Delay",
-            Description = "Set Auto Buy Egg Delay",
-            Default = 1,
-            Min = 0.1,
-            Max = 3,
-            Rounding = 1,
-            Callback = function(Value)
-                Configuration.Egg.AutoBuyEgg_Delay = Value
-            end
-        })
-        local EggType_Dropdown = Tabs.Egg:AddDropdown("Egg Type", {
-            Title = "Types",
-            Values = Eggs_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Egg.Types = Value
-            end,
-        })
-        local Mutations_Dropdown = Tabs.Egg:AddDropdown("Egg Mutations", {
-            Title = "Mutations",
-            Values = Mutations_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Egg.Mutations = Value
-            end,
-        })
-        -- \\ Shop Tab // --
+        Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
+        Tabs.Pet:AddSlider("AutoCollectPet Delay",{ Title = "Auto Collect Pet Delay", Default = 5, Min = 5, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.CollectPet_Delay = v end })
+        Tabs.Pet:AddDropdown("Pet Feed_Type",{ Title = "Select Type", Values = {"BestFood","SelectFood"}, Multi = false, Default = "", Callback = function(v) Configuration.Pet.AutoFeed_Type = v end })
+        Tabs.Pet:AddDropdown("Pet Feed_Food",{ Title = "Select Foods", Values = PetFoods_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.AutoFeed_Foods = v end })
+        Tabs.Pet:AddDropdown("CollectPet Type",{ Title = "Collect Pet Type", Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation","Range"}, Multi = false, Default = "All", Callback = function(v) Configuration.Pet.CollectPet_Type = v end })
+        Tabs.Pet:AddDropdown("CollectPet Pets",{ Title = "Collect Pets", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Pets = v end })
+        Tabs.Pet:AddDropdown("CollectPet Mutations",{ Title = "Collect Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Mutations = v end })
+        Tabs.Pet:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Min = tonumber(v) end })
+        Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Max = tonumber(v) end })
+
+        -- Egg
+        Tabs.Egg:AddSection("Main")
+        Tabs.Egg:AddToggle("Auto Hatch",{ Title = "Auto Hatch", Default = false, Callback = function(v) Configuration.Egg.AutoHatch = v end })
+        Tabs.Egg:AddToggle("Auto Egg",{ Title = "Auto Buy Egg", Default = false, Callback = function(v) Configuration.Egg.AutoBuyEgg = v end })
+        Tabs.Egg:AddToggle("Auto Place Egg",{ Title = "Auto Place Egg", Default = false, Callback = function(v) Configuration.Egg.AutoPlaceEgg = v end })
+        Tabs.Egg:AddSection("Settings")
+        Tabs.Egg:AddSlider("AutoHatch Delay",{ Title = "Hatch Delay", Default = 15, Min = 15, Max = 60, Rounding = 0, Callback = function(v) Configuration.Egg.Hatch_Delay = v end })
+        Tabs.Egg:AddSlider("AutoBuyEgg Delay",{ Title = "Auto Buy Egg Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Egg.AutoBuyEgg_Delay = v end })
+        Tabs.Egg:AddSlider("AutoPlaceEgg Delay",{ Title = "Auto Place Egg Delay", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Egg.AutoPlaceEgg_Delay = v end })
+        Tabs.Egg:AddDropdown("Egg Type",{ Title = "Types", Values = Eggs_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Types = v end })
+        Tabs.Egg:AddDropdown("Egg Mutations",{ Title = "Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Mutations = v end })
+
+        -- Shop
         Tabs.Shop:AddSection("Main")
-        local AutoBuyFood_Toggle = Tabs.Shop:AddToggle("Auto BuyFood",{
-            Title = "Auto Buy Food",
-            Default = false,
-            Callback = function(Value)
-                Configuration.Shop.Food.AutoBuy = Value
-            end})
+        Tabs.Shop:AddToggle("Auto BuyFood",{ Title = "Auto Buy Food", Default = false, Callback = function(v) Configuration.Shop.Food.AutoBuy = v end })
         Tabs.Shop:AddSection("Settings")
-        local AutoBuyFood_Delay = Tabs.Shop:AddSlider("AutoBuyFood Delay", {
-            Title = "Auto Buy Food Delay",
-            Description = "Set Auto Buy Food Delay",
-            Default = 1,
-            Min = 0.1,
-            Max = 3,
-            Rounding = 1,
-            Callback = function(Value)
-                Configuration.Shop.Food.AutoBuy_Delay = Value
-            end
-        })
-        local Foods_Dropdown = Tabs.Shop:AddDropdown("Foods Dropdown", {
-            Title = "Foods",
-            Values = PetFoods_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Shop.Food.Foods = Value
-            end,
-        })
-        -- \\ Event Tab // --
-        Tabs.Event:AddParagraph({
-            Title = "Event Information",
-            Content = string.format("Current Event : %s",EventName),
-        })
+        Tabs.Shop:AddSlider("AutoBuyFood Delay",{ Title = "Auto Buy Food Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Shop.Food.AutoBuy_Delay = v end })
+        Tabs.Shop:AddDropdown("Foods Dropdown",{ Title = "Foods", Values = PetFoods_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Shop.Food.Foods = v end })
+
+        -- Event
+        Tabs.Event:AddParagraph({ Title = "Event Information", Content = string.format("Current Event : %s",EventName) })
         Tabs.Event:AddSection("Main")
-        Tabs.Event:AddToggle("Auto Claim Event Quest",{
-            Title = "Auto Claim",
-            Description = "Auto Claim Event Quests",
-            Default = false,
-            Callback = function(Value)
-                Configuration.Event.AutoClaim = Value
-            end
-        })
+        Tabs.Event:AddToggle("Auto Claim Event Quest",{ Title = "Auto Claim", Default = false, Callback = function(v) Configuration.Event.AutoClaim = v end })
         Tabs.Event:AddSection("Settings")
-        Tabs.Event:AddSlider("Event_AutoClaim Delay", {
-            Title = "Auto Claim Delay",
-            Description = "Set Auto Claim Quest Delay",
-            Default = 3,
-            Min = 3,
-            Max = 30,
-            Rounding = 0,
-            Callback = function(Value)
-                Configuration.Event.AutoClaim_Delay = Value
-            end
-        })
-        -- \\ Players Tab // --
+        Tabs.Event:AddSlider("Event_AutoClaim Delay",{ Title = "Auto Claim Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Event.AutoClaim_Delay = v end })
+
+        -- Players
         Tabs.Players:AddSection("Main")
         Tabs.Players:AddButton({
-            Title = "Send Gift",
-            Description = "Send Gift",
+            Title = "Send Gift", Description = "Send Gift",
             Callback = function()
                 Window:Dialog({
-                    Title = "Send Gift Alert",
-                    Content = "Are you sure?",
+                    Title = "Send Gift Alert", Content = "Are you sure?",
                     Buttons = {
-                        {
-                            Title = "Yes",
-                            Callback = function()
-                                local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
-                                local GiftRE = GameRemoteEvents:WaitForChild("GiftRE")
-                                local GiftType = Configuration.Players.SelectType
-                                local GiftPlayer = Players:FindFirstChild(Configuration.Players.SelectPlayer)
-                                if not GiftPlayer then return end
-                                Configuration.Waiting = true
-                                if GiftType == "All_Pets" then
-                                    for _,PetData in pairs(OwnedPetData:GetChildren()) do
-                                        if PetData and not PetData:GetAttribute("D") then
-                                            CharacterRE:FireServer("Focus",PetData.Name)
-                                            task.wait(0.75)
-                                            GiftRE:FireServer(GiftPlayer)
-                                            task.wait(0.75)
-                                        end
+                        { Title = "Yes", Callback = function()
+                            local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
+                            local GiftRE = GameRemoteEvents:WaitForChild("GiftRE")
+                            local GiftType = Configuration.Players.SelectType
+                            local GiftPlayer = Players:FindFirstChild(Configuration.Players.SelectPlayer)
+                            if not GiftPlayer then return end
+                            Configuration.Waiting = true
+                            if GiftType == "All_Pets" then
+                                for _,PetData in pairs(OwnedPetData:GetChildren()) do
+                                    if PetData and not PetData:GetAttribute("D") then
+                                        CharacterRE:FireServer("Focus",PetData.Name) task.wait(0.75)
+                                        GiftRE:FireServer(GiftPlayer) task.wait(0.75)
                                     end
-                                elseif GiftType == "Match Pet" then
-                                    for _,PetData in pairs(OwnedPetData:GetChildren()) do
-                                        if PetData then
-                                            local petType = PetData:GetAttribute("T")  -- อ่าน attr "T"
-                                            if petType and Configuration.Players.Pet_Type[petType] then
-                                                CharacterRE:FireServer("Focus", PetData.Name)
-                                                task.wait(0.75)
-                                                GiftRE:FireServer(GiftPlayer)
-                                                task.wait(0.75)
-                                            end
-                                        end
-                                    end
-                                elseif GiftType == "All_Foods" then
-                                    for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
-                                        if FoodName and table.find(PetFoods_InGame,FoodName) then
-                                            for i = 1,FoodAmount do
-                                                CharacterRE:FireServer("Focus",FoodName)
-                                                task.wait(0.75)
-                                                GiftRE:FireServer(GiftPlayer)
-                                                task.wait(0.75)
-                                            end
-                                        end
-                                    end
-                                elseif GiftType == "All_Eggs" then
-                                    for _,Egg in pairs(OwnedEggData:GetChildren()) do
-                                        if Egg and not Egg:FindFirstChild("DI") then
-                                            CharacterRE:FireServer("Focus",Egg.Name)
-                                            task.wait(0.75)
-                                            GiftRE:FireServer(GiftPlayer)
-                                            task.wait(0.75)
+                                end
+                            elseif GiftType == "Match Pet" then
+                                for _,PetData in pairs(OwnedPetData:GetChildren()) do
+                                    if PetData then
+                                        local petType = PetData:GetAttribute("T")
+                                        if petType and Configuration.Players.Pet_Type[petType] then
+                                            CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer) task.wait(0.75)
                                         end
                                     end
                                 end
-                                Configuration.Waiting = false
+                            elseif GiftType == "All_Foods" then
+                                for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
+                                    if FoodName and table.find(PetFoods_InGame,FoodName) then
+                                        for i = 1,FoodAmount do
+                                            CharacterRE:FireServer("Focus",FoodName) task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                                        end
+                                    end
+                                end
+                            elseif GiftType == "All_Eggs" then
+                                for _,Egg in pairs(OwnedEggData:GetChildren()) do
+                                    if Egg and not Egg:FindFirstChild("DI") then
+                                        CharacterRE:FireServer("Focus",Egg.Name) task.wait(0.75)
+                                        GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                                    end
+                                end
                             end
-                        },
-                        {
-                            Title = "No",
-                            Callback = function()
-                                
-                            end
-                        }
+                            Configuration.Waiting = false
+                        end },
+                        { Title = "No", Callback = function() end }
                     }
                 })
             end
         })
         Tabs.Players:AddSection("Settings")
-        local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown", {
-            Title = "Select Player",
-            Values = Players_InGame,
-            Multi = false,
-            Default = "",
-            Callback = function(Value)
-                Configuration.Players.SelectPlayer = Value
-            end,
-        })
-        Tabs.Players:AddDropdown("GiftType Dropdown", {
-            Title = "Gift Type",
-            Values = {"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","All_Eggs"},
-            Multi = false,
-            Default = "",
-            Callback = function(Value)
-                Configuration.Players.SelectType = Value
-            end,
-        })
-        Tabs.Players:AddDropdown("Pet Type", {
-            Title = "Select Pet Type",
-            Description = "Select Pet Type",
-            Values = Pets_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Players.Pet_Type = Value
-            end,
-        })
-        Tabs.Players:AddDropdown("Pet Mutations", {
-            Title = "Select Mutations",
-            Description = "Select Pets Mutations",
-            Values = Mutations_InGame,
-            Multi = true,
-            Default = {},
-            Callback = function(Value)
-                Configuration.Players.Pet_Mutations = Value
-            end,
-        })
-        table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList)
-            Players_Dropdown:SetValues(newList)
-        end))
-        -- \\ About Tab // --
-        Tabs.About:AddParagraph({
-            Title = "Credit",
-            Content = "Script create by DemiGodz"
-        })
-        -- \\ Settings Tab // --
-        local AntiAFK_Toggle = Tabs.Settings:AddToggle("AntiAFK",{
-            Title = "Anti AFK",
-            Default = false,
-            Callback = function(Value)
-                ServerReplicatedDict:SetAttribute("AFK_THRESHOLD",(Value == false and 1080 or Value == true and 99999999999))
-                Configuration.AntiAFK = Value
-            end,
-        })
+        local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
+        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+        Tabs.Players:AddDropdown("Pet Type",{ Title = "Select Pet Type", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Type = v end })
+        Tabs.Players:AddDropdown("Pet Mutations",{ Title = "Select Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Mutations = v end })
+        table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList) Players_Dropdown:SetValues(newList) end))
+
+        -- About/Settings
+        Tabs.About:AddParagraph({ Title = "Credit", Content = "Script create by DemiGodz" })
+        Tabs.Settings:AddToggle("AntiAFK",{ Title = "Anti AFK", Default = false, Callback = function(v)
+            ServerReplicatedDict:SetAttribute("AFK_THRESHOLD",(v == false and 1080 or v == true and 99999999999))
+            Configuration.AntiAFK = v
+        end })
     end
-    
+
     SaveManager:SetLibrary(Fluent)
     InterfaceManager:SetLibrary(Fluent)
-    
     SaveManager:IgnoreThemeSettings()
-    
     SaveManager:SetIgnoreIndexes({})
-    
     InterfaceManager:SetFolder("FluentScriptHub")
     SaveManager:SetFolder("FluentScriptHub/"..game.PlaceId)
-    
     InterfaceManager:BuildInterfaceSection(Tabs.Settings)
     SaveManager:BuildConfigSection(Tabs.Settings)
-    
+
     Window:SelectTab(1)
-    
-    Fluent:Notify({
-        Title = "Fluent",
-        Content = "The script has been loaded.",
-        Duration = 8
-    })
-    
-    task.defer(function() -- Anti AFK
+    Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
+
+    -- ===== Anti AFK
+    task.defer(function()
         local VirtualUser = game:GetService("VirtualUser")
         table.insert(EnvirontmentConnections,ServerReplicatedDict:GetAttributeChangedSignal("AFK_THRESHOLD"):Connect(function()
             ServerReplicatedDict:SetAttribute("AFK_THRESHOLD",(Configuration.AntiAFK == false and 1080 or Configuration.AntiAFK == true and 99999999999))
@@ -709,53 +431,60 @@ if game.PlaceId == 105555311806207 then
             task.wait(30)
         end
     end)
-    
-    task.defer(function() -- Auto Collect
-        local Data_OwnedPets = Data:WaitForChild("Pets")
+
+    -- ===== Auto Collect coin from pets
+    task.defer(function()
         local PetRE = GameRemoteEvents:WaitForChild("PetRE")
-        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
-        local FoodList = PetFoods_InGame
         while true and RunningEnvirontments do
             if Configuration.Main.AutoCollect then
                 for _,pet in pairs(OwnedPets) do
                     local RE = pet.RE
                     local Coin = tonumber(pet.Coin)
                     if Configuration.Main.Collect_Type == "Delay" then
-                        if RE then
-                            RE:FireServer("Claim")
-                        end
-                    elseif Configuration.Main.Collect_Type == "Between" and (Configuration.Main.Collect_Between["Min"] < Coin and Coin < Configuration.Main.Collect_Between["Max"]) then
-                        if RE then
-                            RE:FireServer("Claim")
-                        end
+                        if RE then RE:FireServer("Claim") end
+                    elseif Configuration.Main.Collect_Type == "Between" and (Configuration.Main.Collect_Between.Min < Coin and Coin < Configuration.Main.Collect_Between.Max) then
+                        if RE then RE:FireServer("Claim") end
                     end
                 end
             end
             task.wait(Configuration.Main.Collect_Delay)
         end
     end)
-    
-    function GetBestPetFood(FoodList,OwnedFoods)
-        local BestFood = ""
-        for i,v in ipairs(FoodList) do
-            if OwnedFoods[v] then
-                BestFood = v
+
+    -- ===== Helpers Auto Place Egg
+    local function CoordKey(v) if not v then return nil end return tostring(v.X)..","..tostring(v.Z) end
+    local function BuildOccupiedCoordSet()
+        local occ = {}
+        -- จาก OwnedPets ที่แมปไว้ (เร็ว)
+        for _, PetData in pairs(OwnedPets) do
+            local g = PetData and PetData.GridCoord
+            if g then occ[CoordKey(g)] = true end
+        end
+        -- จาก Data Egg (ถ้าไข่วางแล้วจะมี DI)
+        for _, EggCfg in ipairs(OwnedEggData:GetChildren()) do
+            local di = EggCfg:FindFirstChild("DI")
+            if di then
+                local gv = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
+                occ[CoordKey(gv)] = true
             end
         end
-        return BestFood
+        return occ
     end
-    
-    function GetFood(OwnedFoods)
-        local BestFood = ""
-        for i,v in ipairs(PetFoods_InGame) do
-            if Configuration.Pet.AutoFeed_Foods[v] and OwnedFoods[v] then
-                BestFood = v
+    local function GetFreeGridPos()
+        local occ = BuildOccupiedCoordSet()
+        for idx, gridData in ipairs(Grids) do
+            local gc = gridData.GridCoord
+            if gc then
+                if not occ[CoordKey(gc)] then
+                    return gridData.GridPos, idx
+                end
             end
         end
-        return BestFood
+        return nil
     end
-    
-    task.defer(function() -- Auto Feed Pet
+
+    -- ===== Auto Feed Pet
+    task.defer(function()
         local Data_OwnedPets = Data:WaitForChild("Pets",30)
         local PetRE = GameRemoteEvents:WaitForChild("PetRE")
         local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
@@ -764,17 +493,22 @@ if game.PlaceId == 105555311806207 then
             if Configuration.Pet.AutoFeed and not Configuration.Waiting and Configuration.Pet.AutoFeed_Type ~= "" then
                 if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
                 local Data_Inventory = InventoryData:GetAttributes()
-                for _,pet in pairs(Data_OwnedPets:GetChildren()) do
-                    local petData = pet
-                    local pet = OwnedPets[pet.Name] or nil
-                    if not (pet and pet.IsBig) then continue end
-                    if petData and not petData:GetAttribute("Feed") then
-                        local Food = (Configuration.Pet.AutoFeed_Type == "BestFood" and GetBestPetFood(FoodList,Data_Inventory) or Configuration.Pet.AutoFeed_Type == "SelectFood" and GetFood(Data_Inventory))
-                        if Food then
-                            CharacterRE:FireServer("Focus",Food)
-                            task.wait(0.5)
-                            PetRE:FireServer("Feed",pet.UID)
-                            task.wait(0.5)
+                for _,petCfg in pairs(Data_OwnedPets:GetChildren()) do
+                    local petModel = OwnedPets[petCfg.Name] or nil
+                    if not (petModel and petModel.IsBig) then continue end
+                    if petCfg and not petCfg:GetAttribute("Feed") then
+                        local Food = (Configuration.Pet.AutoFeed_Type == "BestFood" and (function()
+                            local best = ""
+                            for i,v in ipairs(FoodList) do if Data_Inventory[v] then best = v end end
+                            return best
+                        end)() or Configuration.Pet.AutoFeed_Type == "SelectFood" and (function()
+                            local best = ""
+                            for i,v in ipairs(PetFoods_InGame) do if Configuration.Pet.AutoFeed_Foods[v] and Data_Inventory[v] then best = v end end
+                            return best
+                        end)())
+                        if Food and Food ~= "" then
+                            CharacterRE:FireServer("Focus",Food) task.wait(0.5)
+                            PetRE:FireServer("Feed",petModel.UID) task.wait(0.5)
                             CharacterRE:FireServer("Focus")
                         end
                     end
@@ -783,31 +517,44 @@ if game.PlaceId == 105555311806207 then
             task.wait(Configuration.Pet.AutoFeed_Delay)
         end
     end)
-    
-    task.defer(function() -- Auto Collect Pet
-    local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE",30)
-    local CollectType = Configuration.Pet.CollectPet_Type
+
+    -- ===== Auto Collect Pet (ตามโหมดที่เลือก)
+    task.defer(function()
+        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE",30)
         while true and RunningEnvirontments do
-                if Configuration.Pet.CollectPet_Auto and not Configuration.Waiting and Configuration.Pet.CollectPet_Type ~= "All" then
-                    if CollectType == "Match Pet" then
-                        for UID,PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del",UID)
-                            end
+            if Configuration.Pet.CollectPet_Auto and not Configuration.Waiting and Configuration.Pet.CollectPet_Type ~= "All" then
+                local CollectType = Configuration.Pet.CollectPet_Type
+                if CollectType == "Match Pet" then
+                    for UID,PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del",UID)
                         end
-                    elseif CollectType == "Match Mutation" then
-                        for UID,PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del",UID)
-                            end
+                    end
+                elseif CollectType == "Match Mutation" then
+                    for UID,PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del",UID)
                         end
-                    elseif CollectType == "Match Pet&Mutation" then
-                        for UID,PetData in pairs(OwnedPets) do
+                    end
+                elseif CollectType == "Match Pet&Mutation" then
+                    for UID,PetData in pairs(OwnedPets) do
                         if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
                             if PetData.RE then PetData.RE:FireServer("Claim") end
                             CharacterRE:FireServer("Del",UID)
+                        end
+                    end
+                elseif CollectType == "Range" then
+                    local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
+                    local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
+                    for UID,PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig then
+                            local ps = tonumber(PetData.ProduceSpeed) or 0
+                            if ps >= minV and ps <= maxV then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end
+                                CharacterRE:FireServer("Del",UID)
+                            end
                         end
                     end
                 end
@@ -815,8 +562,9 @@ if game.PlaceId == 105555311806207 then
             task.wait(Configuration.Pet.CollectPet_Delay)
         end
     end)
-    
-    task.defer(function() -- Auto Hatch
+
+    -- ===== Auto Hatch
+    task.defer(function()
         local OwnedEggs = Data:WaitForChild("Egg")
         while true and RunningEnvirontments do
             if Configuration.Egg.AutoHatch then
@@ -826,24 +574,18 @@ if game.PlaceId == 105555311806207 then
                         local Egg = BlockFolder:FindFirstChild(egg.Name)
                         local RootPart = Egg and (Egg.PrimaryPart or Egg:FindFirstChild("RootPart"))
                         local RF = RootPart and RootPart:FindFirstChild("RF")
-                        if RF then
-                            task.spawn(function()
-                                RF:InvokeServer("Hatch")
-                            end)
-                        end
+                        if RF then task.spawn(function() RF:InvokeServer("Hatch") end) end
                     end
                 end
             end
             task.wait(Configuration.Egg.Hatch_Delay)
         end
     end)
-    
-    task.defer(function() -- Auto Claim Event Quests
-        local Tasks;
-        local EventRE = ResEvent and GameRemoteEvents:WaitForChild(tostring(ResEvent).."RE")
-        if EventTaskData then
-            Tasks = EventTaskData:WaitForChild("Tasks")
-        end
+
+    -- ===== Auto Claim Event Quests
+    task.defer(function()
+        local Tasks; local EventRE = ResEvent and GameRemoteEvents:WaitForChild(tostring(ResEvent).."RE")
+        if EventTaskData then Tasks = EventTaskData:WaitForChild("Tasks") end
         while true and RunningEnvirontments do
             if Tasks and EventRE and Configuration.Event.AutoClaim then
                 for _,Quest in pairs(Tasks:GetChildren()) do
@@ -853,52 +595,109 @@ if game.PlaceId == 105555311806207 then
             task.wait(Configuration.Event.AutoClaim_Delay)
         end
     end)
-    
-    task.defer(function() -- Auto Buy Egg
+
+    -- ===== Auto Buy Egg
+    task.defer(function()
         local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
         while true and RunningEnvirontments do
             if Configuration.Egg.AutoBuyEgg and not Configuration.Waiting then
                 for _,egg in pairs(Egg_Belt) do
-                    local EggType = (egg.Type)
-                    local EggMutation = (egg.Mutate)
-                    if not (Configuration.Egg.Types[EggType] and Configuration.Egg.Mutations[EggMutation]) then continue end
-                    if RE then
-                        RE:FireServer("BuyEgg",egg.UID)
+                    local EggType = egg.Type
+                    local EggMutation = egg.Mutate
+                    if (Configuration.Egg.Types[EggType]) and (Configuration.Egg.Mutations[EggMutation]) then
+                        if RE then RE:FireServer("BuyEgg",egg.UID) end
                     end
                 end
             end
             task.wait(Configuration.Egg.AutoBuyEgg_Delay)
         end
     end)
-    
-    task.defer(function() -- Auto Buy Food
+
+    -- ===== Auto Place Egg (TP + Focus + Place) =====
+    task.defer(function()
+        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
+        local function SurfaceFromGridPos(gridPos) return Vector3.new(gridPos.X, gridPos.Y + 12, gridPos.Z) end
+
+        while true and RunningEnvirontments do
+            if Configuration.Egg.AutoPlaceEgg and not Configuration.Waiting then
+                -- เลือกไข่ที่ยังไม่ถูกวาง + ผ่านฟิลเตอร์ Type/Mutation
+                local chosenEgg = nil
+                for _, egg in ipairs(OwnedEggData:GetChildren()) do
+                    if egg and (not egg:FindFirstChild("DI")) then
+                        local eggType = egg:GetAttribute("T") or "BasicEgg"
+                        local eggMut  = egg:GetAttribute("M") or "None"
+                        local typeOK = (next(Configuration.Egg.Types) == nil) or (Configuration.Egg.Types[eggType] == true)
+                        local mutOK  = (next(Configuration.Egg.Mutations) == nil) or (Configuration.Egg.Mutations[eggMut] == true)
+                        if typeOK and mutOK then chosenEgg = egg break end
+                    end
+                end
+
+                if chosenEgg then
+                    local gridPos = GetFreeGridPos()
+                    if gridPos then
+                        local surfacePosition = SurfaceFromGridPos(gridPos)
+
+                        -- TP ไปที่จุดวาง (ใกล้ ๆ)
+                        local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            hrp.CFrame = CFrame.new(surfacePosition + Vector3.new(0, 4, 0))
+                            task.wait(0.25)
+                        end
+
+                        -- ถือไข่ในมือ (Focus)
+                        CharacterRE:FireServer("Focus", chosenEgg.Name)
+                        task.wait(0.25)
+
+                        -- Place
+                        local ok, err = pcall(function()
+                            CharacterRE:FireServer("Place", {
+                                DST = vector.create(surfacePosition.X, surfacePosition.Y, surfacePosition.Z),
+                                ID  = chosenEgg.Name
+                            })
+                        end)
+
+                        -- ปลด Focus
+                        task.wait(0.15)
+                        CharacterRE:FireServer("Focus")
+
+                        if not ok then
+                            warn("[AutoPlaceEgg] Place failed: " .. tostring(err))
+                        else
+                            task.wait(0.35) -- เผื่อเซิร์ฟอัปเดต
+                        end
+                    else
+                        task.wait(0.6) -- ไม่มีที่ว่าง
+                    end
+                end
+            end
+            task.wait(Configuration.Egg.AutoPlaceEgg_Delay or 1.0)
+        end
+    end)
+
+    -- ===== Auto Buy Food
+    task.defer(function()
         local FoodList = Data:WaitForChild("FoodStore",30):WaitForChild("LST",30)
         local RE = GameRemoteEvents:WaitForChild("FoodStoreRE")
         while true and RunningEnvirontments do
             if Configuration.Shop.Food.AutoBuy and not Configuration.Waiting then
                 for foodName,stockAmount in pairs(FoodList:GetAttributes()) do
                     if stockAmount > 0 and Configuration.Shop.Food.Foods[foodName] then
-                        if RE then
-                            RE:FireServer(foodName)
-                        end
+                        if RE then RE:FireServer(foodName) end
                     end
                 end
             end
             task.wait(Configuration.Shop.Food.AutoBuy_Delay)
         end
     end)
-    
+
+    -- ===== Cleanup
     Window.Root.Destroying:Once(function()
         RunningEnvirontments = false
         for _,connection in pairs(EnvirontmentConnections) do
-            if connection then
-                pcall(function()
-                    connection:Disconnect()
-                end)
-            end
+            if connection then pcall(function() connection:Disconnect() end) end
         end
     end)
-    
+
     SaveManager:LoadAutoloadConfig()
     getgenv().MeowyBuildAZoo = Window
-    end
+end
