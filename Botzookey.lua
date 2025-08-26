@@ -8,7 +8,7 @@ if game.PlaceId == 105555311806207 then
     local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
     -- === KEY GATE CONFIG ===
 local USE_REMOTE_KEYS = true   -- true = ดึงรายชื่อคีย์จากลิงก์, false = ใช้คีย์แบบกำหนดในตารางด้านล่าง
-local REMOTE_KEY_URL  = "https://raw.githubusercontent.com/your/repo/keys.txt"  -- ไฟล์ .txt รายชื่อคีย์ (บรรทัดละ 1 คีย์) ถ้าใช้แบบ remote
+local REMOTE_KEY_URL  = "https://raw.githubusercontent.com/Nattawat1996/BotDiscordEgg/refs/heads/main/key.txt"  -- ไฟล์ .txt รายชื่อคีย์ (บรรทัดละ 1 คีย์) ถ้าใช้แบบ remote
 local ALLOWED_KEYS = {          -- ถ้าไม่ใช้ remote ให้ใส่คีย์ที่นี่
     "YOUR_SUPER_KEY_1",
     "YOUR_SUPER_KEY_2",
