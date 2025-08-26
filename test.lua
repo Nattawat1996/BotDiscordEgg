@@ -122,6 +122,11 @@ local function showKeyGateAndWait()
     })
 end
 
+-- เรียก Key UI ถ้ายังไม่ผ่าน
+if not getgenv().BOTZOO_KEY_OK then
+    showKeyGateAndWait()
+end
+
 -- ===== วิธีผูกโค้ดหลักให้เริ่ม “ทันทีหลังผ่านคีย์” =====
 -- 1) ห่อโค้ดหลักทั้งหมดของคุณไว้ในฟังก์ชันนี้
 local function StartBot()
