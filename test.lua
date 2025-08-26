@@ -59,9 +59,8 @@ local function showKeyGateAndWait()
     local Window = Fluent:CreateWindow({
         Title = "🔑 BotZoo | Key System",
         SubTitle = "กรอกคีย์เพื่อเข้าใช้งาน",
-        TabWidth = 160,          -- คงเป็นตัวเลข
-        SizeX = 560,             -- แทน Size = UDim2.fromOffset(560, 420)
-        SizeY = 420,             -- ↑ ใช้แบบตัวเลขให้ตรงกับ lib
+        TabWidth = 140,
+        Size = UDim2.fromOffset(560, 420),
         Acrylic = true,
         Theme = "Dark",
         MinimizeKey = Enum.KeyCode.LeftControl
