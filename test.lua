@@ -7,11 +7,13 @@ getgenv().OnKeyVerified  = getgenv().OnKeyVerified or {}
 
 local function fireVerified()
     getgenv().BOTZOO_KEY_OK = true
-    -- ยิง callback ทั้งหมดที่รอไว้
     for _, fn in ipairs(getgenv().OnKeyVerified) do
         task.spawn(function()
             local ok, err = pcall(fn)
-            if not ok then warn("[KeyGate] Start callback error:", err) end
+            if not ok then
+                warn("[KeyGate] Start callback error:", err)
+                notify("Start error", tostring(err), 6)   -- << เพิ่มบรรทัดนี้
+            end
         end)
     end
     table.clear(getgenv().OnKeyVerified)
@@ -73,7 +75,9 @@ local function showKeyGateAndWait()
         Title = "🔑 BotZoo | Key System",
         SubTitle = "กรอกคีย์เพื่อเข้าใช้งาน",
         TabWidth = 140,
-        Size = UDim2.fromOffset(560, 420),
+        -- Size = UDim2.fromOffset(560, 420),
+        SizeX = 560,
+        SizeY = 420,
         Acrylic = true,
         Theme = "Dark",
         MinimizeKey = Enum.KeyCode.LeftControl
@@ -117,7 +121,7 @@ local function showKeyGateAndWait()
         Title = "คัดลอก HWID",
         Callback = function()
             setclipboard(getHWID())
-            Fluent:Notify({ Title = "📋 คัดลอกแล้ว", Content = "คัดลอก HWID ไปยังคลิปบอร์ด", Duration = 2 })
+            notify("📋 คัดลอกแล้ว","คัดลอก HWID ไปยังคลิปบอร์ด",2)
         end
     })
 end
@@ -130,6 +134,7 @@ end
 -- ===== วิธีผูกโค้ดหลักให้เริ่ม “ทันทีหลังผ่านคีย์” =====
 -- 1) ห่อโค้ดหลักทั้งหมดของคุณไว้ในฟังก์ชันนี้
 local function StartBot()
+    print("[BotZoo] StartBot() called")
     if game.PlaceId == 105555311806207 then
         if MeowyBuildAZoo then
             MeowyBuildAZoo:Destroy()
@@ -351,9 +356,11 @@ local function StartBot()
         
         local Window = Fluent:CreateWindow({
             Title = GameName,
-            SubTitle = "by Meowy",
+            SubTitle = "by Demigodz",
             TabWidth = 160,
-            Size = UDim2.fromOffset(522, 414),
+            -- Size = UDim2.fromOffset(522, 414),
+            SizeX = 522,
+            SizeY = 414,
             Acrylic = true,
             Theme = "Dark",
             MinimizeKey = Enum.KeyCode.LeftControl
