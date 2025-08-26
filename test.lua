@@ -52,6 +52,25 @@ local function checkKeyRemote(k)
     return false, "คีย์ไม่ถูกต้อง"
 end
 
+-- ===== Compatible notify helper =====
+local function notify(title, content, duration)
+    duration = duration or 3
+    -- 1) Fluent มักมี Notify บนตัว lib
+    if typeof(Fluent) == "table" and typeof(Fluent.Notify) == "function" then
+        return Fluent:Notify({ Title = title, Content = content, Duration = duration })
+    end
+    -- 2) บางฟอร์กผูกไว้กับ InterfaceManager
+    if typeof(InterfaceManager) == "table" and typeof(InterfaceManager.Notify) == "function" then
+        return InterfaceManager:Notify({ Title = title, Content = content, Duration = duration })
+    end
+    -- 3) บางเวอร์ชันอยู่บน Window (เผื่อไว้)
+    if typeof(Window) == "table" and typeof(Window.Notify) == "function" then
+        return Window:Notify({ Title = title, Content = content, Duration = duration })
+    end
+    -- 4) fallback เงียบ ๆ
+    print(("[Notify] %s | %s"):format(title, content))
+end
+
 -- === หน้าต่างกรอกคีย์ (ใช้ Fluent ที่คุณโหลดอยู่แล้ว) ===
 local function showKeyGateAndWait()
     if getgenv().BOTZOO_KEY_OK then return end -- เผื่อกดย้ำ
@@ -80,18 +99,18 @@ local function showKeyGateAndWait()
         Description = "ตรวจสอบและเข้าใช้งาน",
         Callback = function()
             if userKey == "" then
-                return Window:Notify({ Title="❗️กรุณาใส่คีย์", Content="ช่องคีย์ยังว่าง", Duration=3 })
+                return notify("❗️กรุณาใส่คีย์","ช่องคีย์ยังว่างอยู่",3)
             end
             local ok, msg
             if USE_REMOTE_KEYS then ok, msg = checkKeyRemote(userKey) else ok = checkKeyLocal(userKey) end
             if ok then
-                Window:Notify({ Title="✅ สำเร็จ", Content="คีย์ถูกต้อง กำลังเริ่มบอท...", Duration=2 })
+                notify("✅ สำเร็จ","คีย์ถูกต้อง! กำลังเปิดใช้งาน...",3)
                 task.delay(0.15, function()
                     pcall(function() Window:Destroy() end)
                     fireVerified()  -- <<< จุดสำคัญ: สตาร์ทโค้ดหลักที่รออยู่ทันที
                 end)
             else
-                Window:Notify({ Title="⛔️ ไม่ผ่าน", Content=msg or "คีย์ไม่ถูกต้อง", Duration=3 })
+                notify("⛔️ ไม่ผ่าน", errMsg or "คีย์ไม่ถูกต้อง", 4)
             end
         end
     })
@@ -100,7 +119,7 @@ local function showKeyGateAndWait()
         Title = "คัดลอก HWID",
         Callback = function()
             setclipboard(getHWID())
-            Window:Notify({ Title="📋 คัดลอกแล้ว", Content="คัดลอก HWID ไปยังคลิปบอร์ด", Duration=2 })
+            notify("📋 คัดลอกแล้ว","คัดลอก HWID ไปยังคลิปบอร์ด",2)
         end
     })
 end
