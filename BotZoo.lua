@@ -189,12 +189,19 @@ if game.PlaceId == 105555311806207 then
         },
         Pet = {
             AutoFeed = false, AutoFeed_Foods = {},
+            AutoPlacePet = false,
             AutoFeed_Delay = 3, AutoFeed_Type = "",
             CollectPet_Type = "All", CollectPet_Auto = false,
             CollectPet_Mutations = {}, CollectPet_Pets = {},
             CollectPet_Delay = 5,
             CollectPet_Between = {["Min"] = 100000,["Max"] = 1000000},
-        },
+        
+            -- ▼▼ เพิ่มใหม่สำหรับ Auto Place Pet ▼▼
+            PlacePet_Mode = "All",           -- "All" หรือ "Match"
+            PlacePet_Types = {},             -- เลือก Type ที่จะวาง (ถ้า PlacePet_Mode = Match)
+            PlacePet_Mutations = {},         -- เลือก Mutate ที่จะวาง (ถ้า PlacePet_Mode = Match)
+            AutoPlacePet_Delay = 1.0,        -- ดีเลย์ระหว่างการลองวางแต่ละครั้ง
+        },        
         Egg = {
             AutoHatch = false, Hatch_Delay = 15,
             AutoBuyEgg = false, AutoBuyEgg_Delay = 1,
@@ -240,6 +247,7 @@ if game.PlaceId == 105555311806207 then
         Tabs.Pet:AddSection("Main")
         Tabs.Pet:AddToggle("Auto Feed",{ Title = "Auto Feed", Default = false, Callback = function(v) Configuration.Pet.AutoFeed = v end })
         Tabs.Pet:AddToggle("Auto Collect Pet",{ Title = "Auto Collect Pet", Default = false, Callback = function(v) Configuration.Pet.CollectPet_Auto = v end })
+        Tabs.Pet:AddToggle("Auto Place Pet",{ Title = "Auto Place Pet", Default = false, Callback = function(v) Configuration.Pet.AutoPlacePet = v end })
         Tabs.Pet:AddButton({
             Title = "Collect Pet",
             Description = "Collect Pets with Collect Pet Type (no BIG pet)",
@@ -307,7 +315,53 @@ if game.PlaceId == 105555311806207 then
         Tabs.Pet:AddDropdown("CollectPet Mutations",{ Title = "Collect Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Mutations = v end })
         Tabs.Pet:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Min = tonumber(v) end })
         Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Max = tonumber(v) end })
+                -- ====== Pet > Auto Place Pet UI ======
+        Tabs.Pet:AddSection("Auto Place Pet Settings")
 
+        Tabs.Pet:AddDropdown("PlacePet Mode", {
+            Title = "Place Mode",
+            Values = {"All","Match"},
+            Multi = false,
+            Default = "All",
+            Callback = function(v)
+                Configuration.Pet.PlacePet_Mode = v
+            end
+        })
+
+        Tabs.Pet:AddDropdown("PlacePet Types", {
+            Title = "Place Types (Match)",
+            Description = "เลือกประเภทสัตว์ที่จะวาง (ใช้เมื่อ Place Mode = Match)",
+            Values = Pets_InGame,
+            Multi = true,
+            Default = {},
+            Callback = function(v)
+                Configuration.Pet.PlacePet_Types = v
+            end
+        })
+
+        Tabs.Pet:AddDropdown("PlacePet Mutations", {
+            Title = "Place Mutations (Match)",
+            Description = "เลือกมิวเทชันที่จะวาง (ใช้เมื่อ Place Mode = Match)",
+            Values = Mutations_InGame,
+            Multi = true,
+            Default = {},
+            Callback = function(v)
+                Configuration.Pet.PlacePet_Mutations = v
+            end
+        })
+
+        Tabs.Pet:AddSlider("AutoPlacePet Delay", {
+            Title = "Auto Place Pet Delay",
+            Description = "ดีเลย์การพยายามวางสัตว์ในแต่ละครั้ง (วิ)",
+            Default = 1,
+            Min = 0.1,
+            Max = 5,
+            Rounding = 1,
+            Callback = function(v)
+                Configuration.Pet.AutoPlacePet_Delay = v
+            end
+        })
+        -- ====== /Auto Place Pet UI ======
         -- Egg
         Tabs.Egg:AddSection("Main")
         Tabs.Egg:AddToggle("Auto Hatch",{ Title = "Auto Hatch", Default = false, Callback = function(v) Configuration.Egg.AutoHatch = v end })
@@ -451,37 +505,78 @@ if game.PlaceId == 105555311806207 then
         end
     end)
 
-    -- ===== Helpers Auto Place Egg
-    local function CoordKey(v) if not v then return nil end return tostring(v.X)..","..tostring(v.Z) end
-    local function BuildOccupiedCoordSet()
-        local occ = {}
-        -- จาก OwnedPets ที่แมปไว้ (เร็ว)
-        for _, PetData in pairs(OwnedPets) do
-            local g = PetData and PetData.GridCoord
-            if g then occ[CoordKey(g)] = true end
-        end
-        -- จาก Data Egg (ถ้าไข่วางแล้วจะมี DI)
-        for _, EggCfg in ipairs(OwnedEggData:GetChildren()) do
-            local di = EggCfg:FindFirstChild("DI")
-            if di then
-                local gv = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
-                occ[CoordKey(gv)] = true
-            end
-        end
-        return occ
+   -- ========= Helpers for placing (Egg/Pet) =========
+local vector = vector or { create = function(x,y,z) return Vector3.new(x,y,z) end }
+
+local function _ck(v) return v and (tostring(v.X)..","..tostring(v.Z)) or nil end
+
+-- กริดว่าง: จากสัตว์/ไข่ที่วางแล้ว (ดูทั้ง workspace และ Data)
+local function _occupied()
+    local occ = {}
+    for _, P in pairs(OwnedPets) do
+        if P and P.GridCoord then occ[_ck(P.GridCoord)] = true end
     end
-    local function GetFreeGridPos()
-        local occ = BuildOccupiedCoordSet()
-        for idx, gridData in ipairs(Grids) do
-            local gc = gridData.GridCoord
-            if gc then
-                if not occ[CoordKey(gc)] then
-                    return gridData.GridPos, idx
-                end
-            end
+    for _, E in ipairs(OwnedEggData:GetChildren()) do
+        local di = E:FindFirstChild("DI")
+        if di then
+            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
+            occ[_ck(v)] = true
         end
-        return nil
     end
+    return occ
+end
+
+local function GetFreeGridPos()
+    local occ = _occupied()
+    for _, g in ipairs(Grids) do
+        if g.GridCoord and not occ[_ck(g.GridCoord)] then
+            return g.GridPos
+        end
+    end
+    return nil
+end
+
+-- snap ให้เป็นกึ่งกลาง และ raycast หา Y “พื้นจริง”
+local function GroundAtGrid(gridPos)
+    local origin = gridPos + Vector3.new(0, 200, 0)
+    local dir = Vector3.new(0, -1000, 0)
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = {Player.Character}
+    local hit = workspace:Raycast(origin, dir, rp)
+    if hit then return hit.Position + Vector3.new(0, 1.5, 0) end
+    return gridPos + Vector3.new(0, 6, 0)
+end
+
+local function ensureNear(position, maxDist)
+    local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if (hrp.Position - position).Magnitude > (maxDist or 12) then
+        hrp.CFrame = CFrame.new(position + Vector3.new(0, 3.5, 0))
+        task.wait(0.4)
+    end
+end
+
+-- รอผลสำเร็จ: สำหรับไข่→มี DI, สำหรับสัตว์→โมเดลไปโผล่ใน workspace.Pets
+local function waitEggPlaced(eggCfg, timeout)
+    local t0 = tick()
+    while tick() - t0 < (timeout or 2.5) do
+        if eggCfg:FindFirstChild("DI") then return true end
+        task.wait(0.1)
+    end
+    return false
+end
+
+local function waitPetPlaced(uid, timeout)
+    local t0 = tick()
+    while tick() - t0 < (timeout or 2.5) do
+        if OwnedPets[uid] ~= nil then return true end -- เรา map จาก workspace.Pets อยู่แล้ว
+        task.wait(0.1)
+    end
+    return false
+end
+-- ========= /Helpers =========
+
 
     -- ===== Auto Feed Pet
     task.defer(function()
@@ -613,66 +708,110 @@ if game.PlaceId == 105555311806207 then
         end
     end)
 
-    -- ===== Auto Place Egg (TP + Focus + Place) =====
+        -- ===== Auto Place Egg =====
     task.defer(function()
         local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
-        local function SurfaceFromGridPos(gridPos) return Vector3.new(gridPos.X, gridPos.Y + 12, gridPos.Z) end
-
         while true and RunningEnvirontments do
             if Configuration.Egg.AutoPlaceEgg and not Configuration.Waiting then
-                -- เลือกไข่ที่ยังไม่ถูกวาง + ผ่านฟิลเตอร์ Type/Mutation
-                local chosenEgg = nil
+                -- เลือกไข่ยังไม่วาง + ผ่านฟิลเตอร์ (ว่าง = ผ่านทั้งหมด)
+                local chosenEgg
+                local typeOn = next(Configuration.Egg.Types) ~= nil
+                local mutOn  = next(Configuration.Egg.Mutations) ~= nil
                 for _, egg in ipairs(OwnedEggData:GetChildren()) do
-                    if egg and (not egg:FindFirstChild("DI")) then
-                        local eggType = egg:GetAttribute("T") or "BasicEgg"
-                        local eggMut  = egg:GetAttribute("M") or "None"
-                        local typeOK = (next(Configuration.Egg.Types) == nil) or (Configuration.Egg.Types[eggType] == true)
-                        local mutOK  = (next(Configuration.Egg.Mutations) == nil) or (Configuration.Egg.Mutations[eggMut] == true)
-                        if typeOK and mutOK then chosenEgg = egg break end
+                    if egg and not egg:FindFirstChild("DI") then
+                        local t = egg:GetAttribute("T") or "BasicEgg"
+                        local m = egg:GetAttribute("M") or "None"
+                        local okT = (not typeOn) or Configuration.Egg.Types[t]
+                        local okM = (not mutOn)  or Configuration.Egg.Mutations[m]
+                        if okT and okM then chosenEgg = egg break end
                     end
                 end
 
                 if chosenEgg then
-                    local gridPos = GetFreeGridPos()
-                    if gridPos then
-                        local surfacePosition = SurfaceFromGridPos(gridPos)
+                    local grid = GetFreeGridPos()
+                    if grid then
+                        local dst = GroundAtGrid(grid)
 
-                        -- TP ไปที่จุดวาง (ใกล้ ๆ)
-                        local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-                        if hrp then
-                            hrp.CFrame = CFrame.new(surfacePosition + Vector3.new(0, 4, 0))
-                            task.wait(0.25)
-                        end
-
-                        -- ถือไข่ในมือ (Focus)
+                        -- เข้าใกล้จุด, โฟกัสถือไข่
+                        ensureNear(dst, 12)
                         CharacterRE:FireServer("Focus", chosenEgg.Name)
-                        task.wait(0.25)
+                        task.wait(0.45)
 
-                        -- Place
-                        local ok, err = pcall(function()
-                            CharacterRE:FireServer("Place", {
-                                DST = vector.create(surfacePosition.X, surfacePosition.Y, surfacePosition.Z),
-                                ID  = chosenEgg.Name
-                            })
-                        end)
+                        -- ส่งแบบ args + unpack (ตามที่เกมใช้)
+                        local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = chosenEgg.Name } }
+                        print("Try place:", chosenEgg and chosenEgg.Name or petCfg and petCfg.Name, "DST:", dst)
 
-                        -- ปลด Focus
-                        task.wait(0.15)
-                        CharacterRE:FireServer("Focus")
+                        CharacterRE:FireServer(unpack(args))
 
-                        if not ok then
-                            warn("[AutoPlaceEgg] Place failed: " .. tostring(err))
-                        else
-                            task.wait(0.35) -- เผื่อเซิร์ฟอัปเดต
+                        task.wait(0.2)
+                        CharacterRE:FireServer("Focus") -- un-focus
+
+                        -- ยืนยันผล
+                        if not waitEggPlaced(chosenEgg, 3) then
+                            warn("[AutoPlaceEgg] place not confirmed (no DI).")
                         end
-                    else
-                        task.wait(0.6) -- ไม่มีที่ว่าง
                     end
                 end
             end
             task.wait(Configuration.Egg.AutoPlaceEgg_Delay or 1.0)
         end
     end)
+
+
+        -- ===== Auto Place Pet =====
+    task.defer(function()
+        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
+
+        local function pickPet()
+            local mode = Configuration.Pet.PlacePet_Mode
+            local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types) ~= nil)
+            local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
+            for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+                local uid = petCfg.Name
+                -- ยังไม่วางถ้าไม่มีใน OwnedPets
+                if not OwnedPets[uid] then
+                    if mode == "All" then return petCfg end
+                    local t = petCfg:GetAttribute("T")
+                    local m = petCfg:GetAttribute("M") or "None"
+                    local okT = (not typeOn) or Configuration.Pet.PlacePet_Types[t]
+                    local okM = (not mutOn)  or Configuration.Pet.PlacePet_Mutations[m]
+                    if okT and okM then return petCfg end
+                end
+            end
+            return nil
+        end
+
+        while true and RunningEnvirontments do
+            if Configuration.Pet.AutoPlacePet and not Configuration.Waiting then
+                local petCfg = pickPet()
+                if petCfg then
+                    local grid = GetFreeGridPos()
+                    if grid then
+                        local dst = GroundAtGrid(grid)
+
+                        ensureNear(dst, 12)
+                        CharacterRE:FireServer("Focus", petCfg.Name)
+                        task.wait(0.45)
+
+                        local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name } }
+                        print("Try place:", chosenEgg and chosenEgg.Name or petCfg and petCfg.Name, "DST:", dst)
+                        CharacterRE:FireServer(unpack(args))
+
+                        task.wait(0.2)
+                        CharacterRE:FireServer("Focus")
+
+                        if not waitPetPlaced(petCfg.Name, 3) then
+                            warn("[AutoPlacePet] place not confirmed (no model/OwnedPets map).")
+                        end
+                    end
+                end
+            end
+            task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
+        end
+    end)
+
+    -- ===== /Auto Place Pet =====
+
 
     -- ===== Auto Buy Food
     task.defer(function()
