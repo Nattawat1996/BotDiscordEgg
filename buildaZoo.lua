@@ -248,42 +248,65 @@ end
 -- === Collectors ===
 -- placed: อ่านจาก RootPart โดยตรง
 -- inventory: เงินต่อวิจาก GUI (ใหม่) และ T/M จาก OwnedEggData
+-- === Collectors (รวมกลุ่ม type|muta|ps) ===
 local function collectPets()
-    local placed, inv = {}, {}
-
-    -- ทำแผนที่ UID -> model ของสัตว์ที่ "วางอยู่"
-    local modelsByUID = {}
+    local groupsPlaced, groupsInv = {}, {}
     local petsFolder = workspace:FindFirstChild("Pets")
+
+    -- Placed
     if petsFolder then
         for _, model in ipairs(petsFolder:GetChildren()) do
             if model:GetAttribute("UserId") == Player.UserId then
-                modelsByUID[tostring(model)] = model
                 local root = model:FindFirstChild("RootPart") or model.PrimaryPart
                 if root then
-                    local petType = root:GetAttribute("Type")    or getAttrOrChildValue(root, "Type")    or "Unknown"
-                    local muta    = root:GetAttribute("Mutate")  or getAttrOrChildValue(root, "Mutate")  or "None"
-                    local ps      = root:GetAttribute("ProduceSpeed") or getAttrOrChildValue(root,"ProduceSpeed") or 0
-                    table.insert(placed, formatPetLine(petType, muta, ps, tostring(model)))
+                    local t  = root:GetAttribute("Type")   or "Unknown"
+                    local m  = root:GetAttribute("Mutate") or "None"
+                    local ps = root:GetAttribute("ProduceSpeed") or 0
+                    if ps > 0 then
+                        local key = t.."|"..m.."|"..ps
+                        local g = groupsPlaced[key]
+                        if g then g.count += 1
+                        else groupsPlaced[key] = {type=t, muta=m, ps=ps, count=1} end
+                    end
                 end
             end
         end
     end
 
-    -- เดิน Data.Pets → ถ้าไม่มี model อยู่ในโลก ถือว่าเป็น inventory
+    -- Inventory
     if OwnedPetData then
         for _, node in ipairs(OwnedPetData:GetChildren()) do
             local uid = node.Name
-            if not modelsByUID[uid] then
-                local ps, pType, muta = compute_ps_for_inventory_node(node)
-                table.insert(inv, formatPetLine(pType, muta, ps, uid))
+            local modelInWorld = petsFolder and petsFolder:FindFirstChild(uid)
+            if not modelInWorld then
+                local ps, t, m = compute_ps_for_inventory_node(node)
+                if ps > 0 then
+                    local key = t.."|"..m.."|"..ps
+                    local g = groupsInv[key]
+                    if g then g.count += 1
+                    else groupsInv[key] = {type=t, muta=m, ps=ps, count=1} end
+                end
             end
         end
     end
 
-    table.sort(placed, function(a,b) return a:lower() < b:lower() end)
-    table.sort(inv,    function(a,b) return a:lower() < b:lower() end)
-    return placed, inv
+    return groupsPlaced, groupsInv
 end
+
+local function formatGroupedLine(t, m, ps, count)
+    return string.format("%s | %s — %.0f / sec x%d", tostring(t), tostring(m), ps, count)
+end
+
+local function sendGroup(prefix, groups)
+    local lines = {}
+    for _, g in pairs(groups) do
+        table.insert(lines, formatGroupedLine(g.type, g.muta, g.ps, g.count))
+    end
+    table.sort(lines, function(a,b) return a:lower() < b:lower() end)
+    local body = (#lines > 0) and table.concat(lines, "\n") or "ไม่มี"
+    SendMessage(prefix.."\n```"..body.."```")
+end
+
 
 -- แปลง counter -> รายการบรรทัด และเรียงชื่อ
 local function counterToLines(counter)
@@ -401,54 +424,28 @@ local function collectFoods()
     return items
 end
 
--- === ส่งเป็น 3 ข้อความ แยกส่วนชัดเจน ===
 local function sendAll()
     local header = ("📦 Inventory ของ **%s**"):format(Player.Name)
     SendMessage(header)
 
-    local placed, inv = collectPets()
+    local groupsPlaced, groupsInv = collectPets()
     local eggs  = collectEggs()
     local foods = collectFoods()
-    local placedCounts, invCounts = collectPetCountsSplit()
 
-    local function sendLong(prefix, linesTable)
-        local body = (#linesTable > 0) and table.concat(linesTable, "\n") or "ไม่มี"
-        local MAX = 1900
-        if #body <= MAX then
-            SendMessage(prefix .. "\n" .. body)
-        else
-            SendMessage(prefix)
-            local acc, len = {}, 0
-            for _, line in ipairs(linesTable) do
-                local piece = (len == 0) and line or ("\n" .. line)
-                if len + #piece > MAX then
-                    SendMessage(table.concat(acc))
-                    acc, len = {line}, #line
-                else
-                    table.insert(acc, piece); len = len + #piece
-                end
-            end
-            if #acc > 0 then SendMessage(table.concat(acc)) end
-        end
+    sendGroup("🐾 **Pets (สัตว์ที่วางอยู่)**", groupsPlaced)
+    sendGroup("📦 **Pets (สัตว์ในกระเป๋า)**", groupsInv)
+
+    -- counts/eggs/foods ใช้ของเดิมได้
+    local placedCounts, invCounts = collectPetCountsSplit()
+    local function sendList(prefix, lines)
+        local body = (#lines > 0) and table.concat(lines, "\n") or "ไม่มี"
+        SendMessage(prefix.."\n```"..body.."```")
     end
 
-    sendLong("🐾 **Pets (สัตว์ที่วางอยู่: ประเภท | กลายพันธ์ุ | เงินที่ได้ต่อวินาที)**", placed)
-    sendLong("📦 **Pets (สัตว์ในกระเป๋า: ประเภท | กลายพันธ์ุ | เงินที่ได้ต่อวินาที)**", inv)
-
-    sendLong("🔢 **Pet Counts — สัตว์ที่วางอยู่ (Type | Mutate)**",   placedCounts)
-    sendLong("🔢 **Pet Counts — สัตว์ในกระเป๋า (Type | Mutate)**", invCounts)
-
-    sendLong("🥚 **Eggs (ประเภท | กลายพันธ์ุ)**", eggs)
-    sendLong("🍖 **Foods**", foods)
+    sendList("🔢 **Pet Counts — วางอยู่ (Type|Muta)**", placedCounts)
+    sendList("🔢 **Pet Counts — กระเป๋า (Type|Muta)**", invCounts)
+    sendList("🥚 **Eggs**", eggs)
+    sendList("🍖 **Foods**", foods)
 end
 
--- เรียกครั้งเดียว
 sendAll()
-
--- // ถ้าต้องการอัปเดตเรื่อย ๆ
--- task.spawn(function()
---     while true do
---         sendAll()
---         task.wait(30)
---     end
--- end)
