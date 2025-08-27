@@ -209,7 +209,18 @@ if game.PlaceId == 105555311806207 then
             Mutations = {}, Types = {},
         },
         Shop = { Food = { AutoBuy = false, AutoBuy_Delay = 1, Foods = {} } },
-        Players = { SelectPlayer = "", SelectType = "", SendPet_Type = "All", Pet_Type = {}, Pet_Mutations = {} },
+        Players = {
+            SelectPlayer = "",
+            SelectType = "",
+            SendPet_Type = "All",
+            Pet_Type = {},
+            Pet_Mutations = {},
+            -- ▼ เพิ่มใหม่
+            Food_Selected = {},      -- map ของชนิดอาหารที่เลือก {Meat=true, Apple=true}
+            Food_Amounts  = {},      -- map จำนวนต่อชนิด {Meat=3, Apple=1}
+            Food_AmountPick = "",    -- ชนิดที่กำลังเลือกเพื่อกรอกจำนวน
+        },
+        
         Event = { AutoClaim = false, AutoClaim_Delay = 3 },
         AntiAFK = false, Waiting = false,
     }
@@ -429,6 +440,27 @@ if game.PlaceId == 105555311806207 then
                                         end
                                     end
                                 end
+                            elseif GiftType == "Select_Foods" then
+                                -- ส่งเฉพาะชนิดที่เลือก พร้อมจำนวนต่อชนิดจาก Food_Amounts (ดีฟอลต์ 1)
+                                if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                                local inv = InventoryData and InventoryData:GetAttributes() or {}
+                                local selected = Configuration.Players.Food_Selected or {}
+                                local amounts  = Configuration.Players.Food_Amounts  or {}
+                            
+                                for foodName, picked in pairs(selected) do
+                                    if picked and table.find(PetFoods_InGame, foodName) then
+                                        local have = tonumber(inv[foodName] or 0)
+                                        local want = tonumber(amounts[foodName] or 1)
+                                        local sendN = math.max(0, math.min(have, want))
+                            
+                                        for i = 1, sendN do
+                                            CharacterRE:FireServer("Focus", foodName)
+                                            task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer)
+                                            task.wait(0.75)
+                                        end
+                                    end
+                                end                            
                             elseif GiftType == "All_Eggs" then
                                 for _,Egg in pairs(OwnedEggData:GetChildren()) do
                                     if Egg and not Egg:FindFirstChild("DI") then
@@ -446,7 +478,59 @@ if game.PlaceId == 105555311806207 then
         })
         Tabs.Players:AddSection("Settings")
         local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
-        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+        -- เลือกชนิดอาหารที่จะส่ง (ใช้กับ Select_Foods)
+        Tabs.Players:AddDropdown("Gift Foods", {
+            Title = "Foods to Gift (Select)",
+            Description = "เลือกชนิดอาหารที่จะส่ง (ใช้เมื่อ Gift Type = Select_Foods)",
+            Values = PetFoods_InGame,
+            Multi = true,
+            Default = {},
+            Callback = function(v)
+                Configuration.Players.Food_Selected = v   -- map boolean
+            end,
+        })
+
+        -- เลือกชนิดที่จะ “ตั้งจำนวน”
+        local PickFoodDD = Tabs.Players:AddDropdown("Pick Food Amount", {
+            Title = "Pick Food to set amount",
+            Values = PetFoods_InGame,
+            Multi = false,
+            Default = "",
+            Callback = function(v)
+                Configuration.Players.Food_AmountPick = v
+            end,
+        })
+
+        -- กรอกจำนวนสำหรับชนิดที่เลือก
+        Tabs.Players:AddInput("Set Food Amount", {
+            Title = "Set Amount for picked food",
+            Default = 1,
+            Placeholder = "จำนวนสำหรับชนิดที่เลือก",
+            Numeric = true,
+            Finished = true,
+            Callback = function(v)
+                local food = Configuration.Players.Food_AmountPick
+                if food and food ~= "" then
+                    local n = math.max(1, math.floor(tonumber(v) or 1))
+                    Configuration.Players.Food_Amounts[food] = n
+                end
+            end,
+        })
+
+        -- ปุ่มลัด: ตั้งจำนวนเริ่มต้น (1) ให้ทุกชนิดที่เลือกไว้
+        Tabs.Players:AddButton({
+            Title = "Init amounts for selected foods",
+            Description = "ตั้งจำนวนเริ่มต้น = 1 ให้ทุกชนิดที่เลือก (ถ้ายังไม่เคยตั้ง)",
+            Callback = function()
+                for food, on in pairs(Configuration.Players.Food_Selected or {}) do
+                    if on and not Configuration.Players.Food_Amounts[food] then
+                        Configuration.Players.Food_Amounts[food] = 1
+                    end
+                end
+            end
+        })
+
         Tabs.Players:AddDropdown("Pet Type",{ Title = "Select Pet Type", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Type = v end })
         Tabs.Players:AddDropdown("Pet Mutations",{ Title = "Select Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Mutations = v end })
         table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList) Players_Dropdown:SetValues(newList) end))
