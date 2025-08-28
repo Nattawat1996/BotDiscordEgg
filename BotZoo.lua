@@ -1,1 +1,1050 @@
-if (game.PlaceId==(105555311807413 -(696 + 510))) then if MeowyBuildAZoo then MeowyBuildAZoo:Destroy();end repeat task.wait(1 -0 );until game:IsLoaded() local v0=loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))();local v1=loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))();local v2=loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))();local v3=true;local v4=game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)['Name'] or "None" ;local v5={};local v6=game:GetService("Players");local v7=v6.LocalPlayer;local v8={};local v9=v7.UserId;local v10=v7:WaitForChild("PlayerGui",1322 -(1091 + 171) ):WaitForChild("Data",10 + 50 );local v11=game:GetService("ReplicatedStorage");local v12=v11:WaitForChild("Remote",94 -64 );local v13=workspace:WaitForChild("Pets");local v14=v7:GetAttribute("AssignedIslandName");local v15=workspace:WaitForChild("Art"):WaitForChild(v14);local v16=workspace:WaitForChild("PlayerBuiltBlocks");local v17=v11:WaitForChild("Time");local v18=v11:WaitForChild("Config");local v19=v11:WaitForChild("Eggs"):WaitForChild(v14);local v20=v11:WaitForChild("ServerDictReplicated");local v21=v10:WaitForChild("Pets");local v22=v10:WaitForChild("Egg");local v23={create=function(v50,v51,v52) return Vector3.new(v50,v51,v52);end};local v24=require(v18:WaitForChild("ResEgg"))['__index'];local v25=require(v18:WaitForChild("ResMutate"))['__index'];local v26=require(v18:WaitForChild("ResPetFood"))['__index'];local v27=require(v18:WaitForChild("ResPet"))['__index'];local v28={};for v53,v54 in pairs(v15:GetDescendants()) do if (v54:IsA("BasePart") and string.find(tostring(v54),"Farm")) then table.insert(v28,{GridCoord=v54:GetAttribute("IslandCoord"),GridPos=v54.Position});end end local v29;local v30;local v31="None";for v55,v56 in pairs(v10:GetChildren()) do local v57=(tostring(v56):match("^(.*)EventTaskData$"));if v57 then v29=v56;break;end end for v58,v59 in pairs(v11:GetChildren()) do local v60=(tostring(v59):match("^(.*)Event$"));if v60 then v30=v59;v31=v60;break;end end local v32=v10:WaitForChild("Asset",30);local v33=Instance.new("BindableEvent");table.insert(v5,v6.PlayerRemoving:Connect(function(v61) local v62=table.find(v8,v61.Name);if v62 then table.remove(v8,v62);end v33:Fire(v8);end));table.insert(v5,v6.PlayerAdded:Connect(function(v63) local v64=0 -0 ;while true do if (v64==(374 -(123 + 251))) then table.insert(v8,v63.Name);v33:Fire(v8);break;end end end));for v65,v66 in pairs(v6:GetPlayers()) do table.insert(v8,v66.Name);end local v34={};local v35={};table.insert(v5,v19.ChildRemoved:Connect(function(v67) task.wait(0.1 -0 );local v68=tostring(v67) or "None" ;if (v67 and v35[v68]) then v35[v68]=nil;end end));table.insert(v5,v19.ChildAdded:Connect(function(v69) local v70=0;local v71;while true do if (v70==1) then if v69 then v35[v71]={UID=v71,Mutate=v69:GetAttribute("M") or "None" ,Type=v69:GetAttribute("T") or "BasicEgg" };end break;end if (v70==0) then task.wait(698.1 -(208 + 490) );v71=tostring(v69) or "None" ;v70=1 + 0 ;end end end));for v72,v73 in pairs(v19:GetChildren()) do task.spawn(pcall,function() local v151=0;local v152;while true do if (v151==(0 + 0)) then v152=tostring(v73) or "None" ;if v73 then v35[v152]={UID=v152,Mutate=v73:GetAttribute("M") or "None" ,Type=v73:GetAttribute("T") or "BasicEgg" };end break;end end end);end table.insert(v5,v13.ChildRemoved:Connect(function(v74) local v75=836 -(660 + 176) ;local v76;while true do if (v75==1) then if (v74 and v34[v76]) then v34[v76]=nil;end break;end if (v75==(0 + 0)) then task.wait(0.1);v76=tostring(v74) or "None" ;v75=203 -(14 + 188) ;end end end));local function v36(v77) local v78=675 -(534 + 141) ;while true do if ((0 + 0)==v78) then if v77 then local v307=string.gsub(v77,"[$,]","");return tonumber(v307);end return 0 + 0 ;end end end table.insert(v5,v13.ChildAdded:Connect(function(v79) local v80=0;local v81;local v82;local v83;local v84;local v85;local v86;local v87;while true do if (v80==2) then v85=v84 and (v84:FindFirstChild("CashF") or v84:WaitForChild("CashF")) ;v86=v85 and (v85:FindFirstChild("TXT") or v85:WaitForChild("TXT")) ;v87=v21 and v21:WaitForChild(v81):WaitForChild("DI") ;v80=3;end if (v80==(1 + 0)) then if  not v82 then return;end v83=v79 and (v79.PrimaryPart or v79:FindFirstChild("RootPart") or v79:WaitForChild("RootPart")) ;v84=v83 and (v83:FindFirstChild("GUI/IdleGUI") or v83:WaitForChild("GUI/IdleGUI")) ;v80=3 -1 ;end if (v80==3) then v87=(v87 and Vector3.new(v87:GetAttribute("X"),v87:GetAttribute("Y"),v87:GetAttribute("Z"))) or nil ;if (v79 and v82) then v34[v81]=setmetatable({GridCoord=v87,UID=v81,Type=(v83:GetAttribute("Type")),Mutate=(v83:GetAttribute("Mutate")),Model=v79,RootPart=v83,RE=v83 and v83:FindFirstChild("RE",true) ,IsBig=v83 and (v83:GetAttribute("BigValue")~=nil) },{__index=(function(v321,v322) local v323=0 -0 ;while true do if (v323==(0 -0)) then if (v322=="Coin") then return v86 and v36(v86.Text) ;elseif ((v322=="ProduceSpeed") or (v322=="PS")) then return (v83 and v83:GetAttribute("ProduceSpeed")) or (0 + 0) ;end return rawget(v321,v322);end end end)});end break;end if (v80==(0 + 0)) then task.wait(396.1 -(115 + 281) );v81=tostring(v79) or "None" ;v82=v79:GetAttribute("UserId")==v9 ;v80=2 -1 ;end end end));for v88,v89 in pairs(v13:GetChildren()) do task.spawn(pcall,function() local v153=0 + 0 ;local v154;local v155;local v156;local v157;local v158;local v159;local v160;while true do if (v153==(0 -0)) then v154=tostring(v89) or "None" ;v155=v89:GetAttribute("UserId")==v9 ;v153=3 -2 ;end if ((868 -(550 + 317))==v153) then if  not v155 then return;end v156=v89 and (v89.PrimaryPart or v89:FindFirstChild("RootPart") or v89:WaitForChild("RootPart")) ;v153=2;end if (v153==4) then v160=(v160 and Vector3.new(v160:GetAttribute("X"),v160:GetAttribute("Y"),v160:GetAttribute("Z"))) or nil ;v34[v154]=setmetatable({GridCoord=v160,UID=v154,Type=(v156:GetAttribute("Type")),Mutate=(v156:GetAttribute("Mutate")),Model=v89,RootPart=v156,RE=v156 and v156:FindFirstChild("RE",true) ,IsBig=v156 and (v156:GetAttribute("BigValue")~=nil) },{__index=(function(v309,v310) if (v310=="Coin") then return v159 and v36(v159.Text) ;elseif ((v310=="ProduceSpeed") or (v310=="PS")) then return (v156 and v156:GetAttribute("ProduceSpeed")) or (0 -0) ;end return rawget(v309,v310);end)});break;end if (v153==3) then v159=v158 and (v158:FindFirstChild("TXT") or v158:WaitForChild("TXT")) ;v160=v21 and v21:WaitForChild(v154):WaitForChild("DI") ;v153=4;end if (v153==(2 -0)) then v157=v156 and (v156:FindFirstChild("GUI/IdleGUI") or v156:WaitForChild("GUI/IdleGUI")) ;v158=v157 and (v157:FindFirstChild("CashF") or v157:WaitForChild("CashF")) ;v153=8 -5 ;end end end);end local v37={Main={AutoCollect=false,Collect_Delay=290 -(134 + 151) ,Collect_Type="Delay",Collect_Between={Min=101665 -(970 + 695) ,Max=1908236 -908236 }},Pet={AutoFeed=false,AutoFeed_Foods={},AutoPlacePet=false,AutoFeed_Delay=1993 -(582 + 1408) ,AutoFeed_Type="",CollectPet_Type="All",CollectPet_Auto=false,CollectPet_Mutations={},CollectPet_Pets={},CollectPet_Delay=17 -12 ,CollectPet_Between={Min=125822 -25822 ,Max=1000000},PlacePet_Mode="All",PlacePet_Types={},PlacePet_Mutations={},AutoPlacePet_Delay=3 -2 ,PlacePet_Between={Min=1824 -(1195 + 629) ,Max=1000000000000000000 -956525864 }},Egg={AutoHatch=false,Hatch_Delay=1566 -(226 + 1325) ,AutoBuyEgg=false,AutoBuyEgg_Delay=1 + 0 ,AutoPlaceEgg=false,AutoPlaceEgg_Delay=1 + 0 ,Mutations={},Types={}},Shop={Food={AutoBuy=false,AutoBuy_Delay=1,Foods={}}},Players={SelectPlayer="",SelectType="",SendPet_Type="All",Pet_Type={},Pet_Mutations={},Food_Selected={},Food_Amounts={},Food_AmountPick=""},Event={AutoClaim=false,AutoClaim_Delay=2 + 1 },AntiAFK=false,Waiting=false};local v38=v0:CreateWindow({Title=v4,SubTitle="by DemiGodz",TabWidth=160,Size=UDim2.fromOffset(1112 -590 ,695 -281 ),Acrylic=true,Theme="Dark",MinimizeKey=Enum.KeyCode.LeftControl});local v39={About=v38:AddTab({Title="About",Icon=""}),Main=v38:AddTab({Title="Main Features",Icon=""}),Pet=v38:AddTab({Title="Pet Features",Icon=""}),Egg=v38:AddTab({Title="Egg Features",Icon=""}),Shop=v38:AddTab({Title="Shop Features",Icon=""}),Event=v38:AddTab({Title="Event Feature",Icon=""}),Players=v38:AddTab({Title="Players Features",Icon=""}),Settings=v38:AddTab({Title="Settings",Icon="settings"})};local v40=v0.Options;do v39.Main:AddSection("Main");v39.Main:AddToggle("AutoCollect",{Title="Auto Collect",Default=false,Callback=function(v161) v37.Main.AutoCollect=v161;end});v39.Main:AddSection("Settings");v39.Main:AddSlider("AutoCollect Delay",{Title="Collect Delay",Default=1 + 4 ,Min=1637 -(1373 + 263) ,Max=30,Rounding=1000 -(451 + 549) ,Callback=function(v163) v37.Main.Collect_Delay=v163;end});v39.Main:AddDropdown("CollectCash Type",{Title="Select Type",Values={"Delay","Between"},Multi=false,Default="Delay",Callback=function(v165) v37.Main.Collect_Type=v165;end});v39.Main:AddInput("CollectCash_Num1",{Title="Min Coin",Default=168066 -68066 ,Numeric=true,Finished=false,Callback=function(v167) v37.Main.Collect_Between.Min=tonumber(v167);end});v39.Main:AddInput("CollectCash_Num2",{Title="Max Coin",Default=1001384 -(746 + 638) ,Numeric=true,Finished=false,Callback=function(v169) v37.Main.Collect_Between.Max=tonumber(v169);end});v39.Pet:AddSection("Main");v39.Pet:AddToggle("Auto Feed",{Title="Auto Feed",Default=false,Callback=function(v171) v37.Pet.AutoFeed=v171;end});v39.Pet:AddToggle("Auto Collect Pet",{Title="Auto Collect Pet",Default=false,Callback=function(v173) v37.Pet.CollectPet_Auto=v173;end});v39.Pet:AddToggle("Auto Place Pet",{Title="Auto Place Pet",Default=false,Callback=function(v175) v37.Pet.AutoPlacePet=v175;end});v39.Pet:AddButton({Title="Collect Pet",Description="Collect Pets with Collect Pet Type (no BIG pet)",Callback=function() v38:Dialog({Title="Collect Pet Alert",Content="Are you sure?",Buttons={{Title="Yes",Callback=function() local v270=v12:WaitForChild("CharacterRE");local v271=v37.Pet.CollectPet_Type;if (v271=="All") then for v311,v312 in pairs(v34) do if (v312 and  not v312.IsBig) then if v312.RE then v312.RE:FireServer("Claim");end v270:FireServer("Del",v311);end end elseif (v271=="Match Pet") then for v342,v343 in pairs(v34) do if (v343 and  not v343.IsBig and v37.Pet.CollectPet_Pets[v343.Type]) then local v359=0 -0 ;while true do if (v359==(341 -(218 + 123))) then if v343.RE then v343.RE:FireServer("Claim");end v270:FireServer("Del",v342);break;end end end end elseif (v271=="Match Mutation") then for v360,v361 in pairs(v34) do if (v361 and  not v361.IsBig and v37.Pet.CollectPet_Mutations[v361.Mutate]) then if v361.RE then v361.RE:FireServer("Claim");end v270:FireServer("Del",v360);end end elseif (v271=="Match Pet&Mutation") then for v388,v389 in pairs(v34) do if (v389 and  not v389.IsBig and v37.Pet.CollectPet_Pets[v389.Type] and v37.Pet.CollectPet_Mutations[v389.Mutate]) then if v389.RE then v389.RE:FireServer("Claim");end v270:FireServer("Del",v388);end end elseif (v271=="Range") then local v395=0;local v396;local v397;while true do if (v395==(1582 -(1535 + 46))) then for v426,v427 in pairs(v34) do if (v427 and  not v427.IsBig) then local v437=0;local v438;while true do if (v437==0) then v438=tonumber(v427.ProduceSpeed) or 0 ;if ((v438>=v396) and (v438<=v397)) then if v427.RE then v427.RE:FireServer("Claim");end v270:FireServer("Del",v426);end break;end end end end break;end if (v395==(0 + 0)) then v396=tonumber(v37.Pet.CollectPet_Between.Min) or 0 ;v397=tonumber(v37.Pet.CollectPet_Between.Max) or math.huge ;v395=1;end end end end},{Title="No",Callback=function() end}}});end});v39.Pet:AddSection("Settings");v39.Pet:AddSlider("AutoFeed Delay",{Title="Feed Delay",Default=1 + 2 ,Min=563 -(306 + 254) ,Max=2 + 28 ,Rounding=0 -0 ,Callback=function(v177) v37.Pet.AutoFeed_Delay=v177;end});v39.Pet:AddSlider("AutoCollectPet Delay",{Title="Auto Collect Pet Delay",Default=1472 -(899 + 568) ,Min=4 + 1 ,Max=145 -85 ,Rounding=603 -(268 + 335) ,Callback=function(v179) v37.Pet.CollectPet_Delay=v179;end});v39.Pet:AddDropdown("Pet Feed_Type",{Title="Select Type",Values={"BestFood","SelectFood"},Multi=false,Default="",Callback=function(v181) v37.Pet.AutoFeed_Type=v181;end});v39.Pet:AddDropdown("Pet Feed_Food",{Title="Select Foods",Values=v26,Multi=true,Default={},Callback=function(v183) v37.Pet.AutoFeed_Foods=v183;end});v39.Pet:AddDropdown("CollectPet Type",{Title="Collect Pet Type",Values={"All","Match Pet","Match Mutation","Match Pet&Mutation","Range"},Multi=false,Default="All",Callback=function(v185) v37.Pet.CollectPet_Type=v185;end});v39.Pet:AddDropdown("CollectPet Pets",{Title="Collect Pets",Values=v27,Multi=true,Default={},Callback=function(v187) v37.Pet.CollectPet_Pets=v187;end});v39.Pet:AddDropdown("CollectPet Mutations",{Title="Collect Mutations",Values=v25,Multi=true,Default={},Callback=function(v189) v37.Pet.CollectPet_Mutations=v189;end});v39.Pet:AddInput("CollectCash_Num1",{Title="Min Coin",Default=100000,Numeric=true,Finished=false,Callback=function(v191) v37.Pet.CollectPet_Between.Min=tonumber(v191);end});v39.Pet:AddInput("CollectCash_Num2",{Title="Max Coin",Default=1000811 -(569 + 242) ,Numeric=true,Finished=false,Callback=function(v193) v37.Pet.CollectPet_Between.Max=tonumber(v193);end});v39.Pet:AddSection("Auto Place Pet Settings");v39.Pet:AddDropdown("PlacePet Mode",{Title="Place Mode",Values={"All","Match","Range"},Multi=false,Default="All",Callback=function(v195) v37.Pet.PlacePet_Mode=v195;end});v39.Pet:AddDropdown("PlacePet Types",{Title="Place Types (Match)",Description="เลือกประเภทสัตว์ที่จะวาง (ใช้เมื่อ Place Mode = Match)",Values=v27,Multi=true,Default={},Callback=function(v197) v37.Pet.PlacePet_Types=v197;end});v39.Pet:AddDropdown("PlacePet Mutations",{Title="Place Mutations (Match)",Description="เลือกมิวเทชันที่จะวาง (ใช้เมื่อ Place Mode = Match)",Values=v25,Multi=true,Default={},Callback=function(v199) v37.Pet.PlacePet_Mutations=v199;end});v39.Pet:AddSlider("AutoPlacePet Delay",{Title="Auto Place Pet Delay",Description="ดีเลย์การพยายามวางสัตว์ในแต่ละครั้ง (วิ)",Default=1252 -(721 + 530) ,Min=1271.1 -(945 + 326) ,Max=12 -7 ,Rounding=1 + 0 ,Callback=function(v201) v37.Pet.AutoPlacePet_Delay=v201;end});v39.Pet:AddInput("PlacePet_MinIncome",{Title="Min income/s (Range)",Default=tostring(v37.Pet.PlacePet_Between.Min or 0 ),Numeric=true,Finished=true,Callback=function(v203) local v204=tonumber(v203) or 0 ;v37.Pet.PlacePet_Between.Min=v204;end});v39.Pet:AddInput("PlacePet_MaxIncome",{Title="Max income/s (Range)",Default=tostring(v37.Pet.PlacePet_Between.Max or 1000000 ),Numeric=true,Finished=true,Callback=function(v206) local v207=tonumber(v206) or math.huge ;v37.Pet.PlacePet_Between.Max=v207;end});v39.Egg:AddSection("Main");v39.Egg:AddToggle("Auto Hatch",{Title="Auto Hatch",Default=false,Callback=function(v209) v37.Egg.AutoHatch=v209;end});v39.Egg:AddToggle("Auto Egg",{Title="Auto Buy Egg",Default=false,Callback=function(v211) v37.Egg.AutoBuyEgg=v211;end});v39.Egg:AddToggle("Auto Place Egg",{Title="Auto Place Egg",Default=false,Callback=function(v213) v37.Egg.AutoPlaceEgg=v213;end});v39.Egg:AddSection("Settings");v39.Egg:AddSlider("AutoHatch Delay",{Title="Hatch Delay",Default=15,Min=715 -(271 + 429) ,Max=56 + 4 ,Rounding=1500 -(1408 + 92) ,Callback=function(v215) v37.Egg.Hatch_Delay=v215;end});v39.Egg:AddSlider("AutoBuyEgg Delay",{Title="Auto Buy Egg Delay",Default=1087 -(461 + 625) ,Min=0.1,Max=1291 -(993 + 295) ,Rounding=1,Callback=function(v217) v37.Egg.AutoBuyEgg_Delay=v217;end});v39.Egg:AddSlider("AutoPlaceEgg Delay",{Title="Auto Place Egg Delay",Default=1 + 0 ,Min=1171.1 -(418 + 753) ,Max=5,Rounding=1 + 0 ,Callback=function(v219) v37.Egg.AutoPlaceEgg_Delay=v219;end});v39.Egg:AddDropdown("Egg Type",{Title="Types",Values=v24,Multi=true,Default={},Callback=function(v221) v37.Egg.Types=v221;end});v39.Egg:AddDropdown("Egg Mutations",{Title="Mutations",Values=v25,Multi=true,Default={},Callback=function(v223) v37.Egg.Mutations=v223;end});v39.Shop:AddSection("Main");v39.Shop:AddToggle("Auto BuyFood",{Title="Auto Buy Food",Default=false,Callback=function(v225) v37.Shop.Food.AutoBuy=v225;end});v39.Shop:AddSection("Settings");v39.Shop:AddSlider("AutoBuyFood Delay",{Title="Auto Buy Food Delay",Default=1 + 0 ,Min=0.1,Max=3,Rounding=1 + 0 ,Callback=function(v227) v37.Shop.Food.AutoBuy_Delay=v227;end});v39.Shop:AddDropdown("Foods Dropdown",{Title="Foods",Values=v26,Multi=true,Default={},Callback=function(v229) v37.Shop.Food.Foods=v229;end});v39.Event:AddParagraph({Title="Event Information",Content=string.format("Current Event : %s",v31)});v39.Event:AddSection("Main");v39.Event:AddToggle("Auto Claim Event Quest",{Title="Auto Claim",Default=false,Callback=function(v231) v37.Event.AutoClaim=v231;end});v39.Event:AddSection("Settings");v39.Event:AddSlider("Event_AutoClaim Delay",{Title="Auto Claim Delay",Default=3,Min=3,Max=8 + 22 ,Rounding=529 -(406 + 123) ,Callback=function(v233) v37.Event.AutoClaim_Delay=v233;end});v39.Players:AddSection("Main");v39.Players:AddButton({Title="Send Gift",Description="Send Gift",Callback=function() v38:Dialog({Title="Send Gift Alert",Content="Are you sure?",Buttons={{Title="Yes",Callback=function() local v272=v12:WaitForChild("CharacterRE");local v273=v12:WaitForChild("GiftRE");local v274=v37.Players.SelectType;local v275=v6:FindFirstChild(v37.Players.SelectPlayer);if  not v275 then return;end v37.Waiting=true;if (v274=="All_Pets") then for v313,v314 in pairs(v21:GetChildren()) do if (v314 and  not v314:GetAttribute("D")) then local v344=0 + 0 ;while true do if (v344==(1323 -(1249 + 73))) then v273:FireServer(v275);task.wait(0.75);break;end if (v344==(0 + 0)) then v272:FireServer("Focus",v314.Name);task.wait(1145.75 -(466 + 679) );v344=1;end end end end elseif (v274=="Match Pet") then for v345,v346 in pairs(v21:GetChildren()) do if v346 then local v362=v346:GetAttribute("T");if (v362 and v37.Players.Pet_Type[v362]) then v272:FireServer("Focus",v346.Name);task.wait(0.75 -0 );v273:FireServer(v275);task.wait(0.75 -0 );end end end elseif (v274=="All_Foods") then for v363,v364 in pairs(v32:GetAttributes()) do if (v363 and table.find(v26,v363)) then for v398=1,v364 do v272:FireServer("Focus",v363);task.wait(0.75);v273:FireServer(v275);task.wait(0.75);end end end elseif (v274=="Select_Foods") then local v377=1900 -(106 + 1794) ;local v378;local v379;local v380;while true do if (v377==(0 + 0)) then if  not v32 then v32=v10:FindFirstChild("Asset");end v378=(v32 and v32:GetAttributes()) or {} ;v377=1;end if (v377==(1 + 0)) then v379=v37.Players.Food_Selected or {} ;v380=v37.Players.Food_Amounts or {} ;v377=2;end if (v377==(5 -3)) then for v414,v415 in pairs(v379) do if (v415 and table.find(v26,v414)) then local v428=tonumber(v378[v414] or (0 -0) );local v429=tonumber(v380[v414] or (115 -(4 + 110)) );local v430=math.max(584 -(57 + 527) ,math.min(v428,v429));for v434=1428 -(41 + 1386) ,v430 do v272:FireServer("Focus",v414);task.wait(103.75 -(17 + 86) );v273:FireServer(v275);task.wait(0.75 + 0 );end end end break;end end elseif (v274=="All_Eggs") then for v404,v405 in pairs(v22:GetChildren()) do if (v405 and  not v405:FindFirstChild("DI")) then local v422=0;while true do if (v422==(1 -0)) then v273:FireServer(v275);task.wait(0.75 -0 );break;end if (v422==(166 -(122 + 44))) then v272:FireServer("Focus",v405.Name);task.wait(0.75 -0 );v422=3 -2 ;end end end end end v37.Waiting=false;end},{Title="No",Callback=function() end}}});end});v39.Players:AddSection("Settings");local v90=v39.Players:AddDropdown("Players Dropdown",{Title="Select Player",Values=v8,Multi=false,Default="",Callback=function(v235) v37.Players.SelectPlayer=v235;end});v39.Players:AddDropdown("GiftType Dropdown",{Title="Gift Type",Values={"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs"},Multi=false,Default="",Callback=function(v237) v37.Players.SelectType=v237;end});v39.Players:AddDropdown("Gift Foods",{Title="Foods to Gift (Select)",Description="เลือกชนิดอาหารที่จะส่ง (ใช้เมื่อ Gift Type = Select_Foods)",Values=v26,Multi=true,Default={},Callback=function(v239) v37.Players.Food_Selected=v239;end});local v91=v39.Players:AddDropdown("Pick Food Amount",{Title="Pick Food to set amount",Values=v26,Multi=false,Default="",Callback=function(v241) v37.Players.Food_AmountPick=v241;end});v39.Players:AddInput("Set Food Amount",{Title="Set Amount for picked food",Default=1 + 0 ,Placeholder="จำนวนสำหรับชนิดที่เลือก",Numeric=true,Finished=true,Callback=function(v243) local v244=1257 -(1043 + 214) ;local v245;while true do if (v244==(0 -0)) then v245=v37.Players.Food_AmountPick;if (v245 and (v245~="")) then local v324=0;local v325;while true do if (v324==(1212 -(323 + 889))) then v325=math.max(1,math.floor(tonumber(v243) or (2 -1) ));v37.Players.Food_Amounts[v245]=v325;break;end end end break;end end end});v39.Players:AddButton({Title="Init amounts for selected foods",Description="ตั้งจำนวนเริ่มต้น = 1 ให้ทุกชนิดที่เลือก (ถ้ายังไม่เคยตั้ง)",Callback=function() for v277,v278 in pairs(v37.Players.Food_Selected or {} ) do if (v278 and  not v37.Players.Food_Amounts[v277]) then v37.Players.Food_Amounts[v277]=581 -(361 + 219) ;end end end});v39.Players:AddDropdown("Pet Type",{Title="Select Pet Type",Values=v27,Multi=true,Default={},Callback=function(v246) v37.Players.Pet_Type=v246;end});v39.Players:AddDropdown("Pet Mutations",{Title="Select Mutations",Values=v25,Multi=true,Default={},Callback=function(v248) v37.Players.Pet_Mutations=v248;end});table.insert(v5,v33.Event:Connect(function(v250) v90:SetValues(v250);end));v39.About:AddParagraph({Title="Credit",Content="Script create by DemiGodz"});v39.Settings:AddToggle("AntiAFK",{Title="Anti AFK",Default=false,Callback=function(v251) local v252=320 -(53 + 267) ;while true do if (v252==(0 + 0)) then v20:SetAttribute("AFK_THRESHOLD",((v251==false) and (1493 -(15 + 398))) or ((v251==true) and (100000000981 -(18 + 964))) );v37.AntiAFK=v251;break;end end end});end v1:SetLibrary(v0);v2:SetLibrary(v0);v1:IgnoreThemeSettings();v1:SetIgnoreIndexes({});v2:SetFolder("FluentScriptHub");v1:SetFolder("FluentScriptHub/"   .. game.PlaceId );v2:BuildInterfaceSection(v39.Settings);v1:BuildConfigSection(v39.Settings);v38:SelectTab(3 -2 );v0:Notify({Title="Fluent",Content="The script has been loaded.",Duration=8});task.defer(function() local v92=0;local v93;while true do if (0==v92) then v93=game:GetService("VirtualUser");table.insert(v5,v20:GetAttributeChangedSignal("AFK_THRESHOLD"):Connect(function() v20:SetAttribute("AFK_THRESHOLD",((v37.AntiAFK==false) and (626 + 454)) or ((v37.AntiAFK==true) and (100000000849 -(20 + 830))) );end));v92=1;end if ((1 + 0)==v92) then while true and v3  do if v37.AntiAFK then v93:CaptureController();v93:ClickButton2(Vector2.new());end task.wait(156 -(116 + 10) );end break;end end end);task.defer(function() local v94=v12:WaitForChild("PetRE");while true and v3  do if v37.Main.AutoCollect then for v287,v288 in pairs(v34) do local v289=0 + 0 ;local v290;local v291;while true do if ((739 -(542 + 196))==v289) then if (v37.Main.Collect_Type=="Delay") then if v290 then v290:FireServer("Claim");end elseif ((v37.Main.Collect_Type=="Between") and (v37.Main.Collect_Between.Min<v291) and (v291<v37.Main.Collect_Between.Max)) then if v290 then v290:FireServer("Claim");end end break;end if (v289==(0 -0)) then v290=v288.RE;v291=tonumber(v288.Coin);v289=1 + 0 ;end end end end task.wait(v37.Main.Collect_Delay);end end);local function v41(v95) local v96=0 + 0 ;local v97;local v98;local v99;local v100;local v101;local v102;local v103;local v104;local v105;local v106;local v107;local v108;local v109;while true do if (v96==3) then if  not v102 then for v326,v327 in ipairs(v101:GetChildren()) do if (v327.Name==v95) then v102=v327;break;end end end if  not v102 then return nil;end v103=v102:FindFirstChild("BTN") or v102:FindFirstChildWhichIsA("Frame") ;if  not v103 then return nil;end v96=4;end if (v96==(2 + 3)) then v106=v105:FindFirstChild("Value");if v106 then if (v106:IsA("NumberValue") or v106:IsA("IntValue")) then return tonumber(v106.Value);elseif v106:IsA("StringValue") then local v366=0 -0 ;local v367;local v368;while true do if (v366==(0 -0)) then v367=tostring(v106.Value or "" );v368=tonumber((v367:gsub("[^%d%.]","")));v366=1552 -(1126 + 425) ;end if (v366==1) then return v368;end end end end v107=nil;function v107(v292) local v293,v294=pcall(function() return v292.Text;end);if (v293 and v294) then local v328=tonumber((tostring(v294):gsub("[^%d%.]","")));if v328 then return v328;end end return nil;end v96=411 -(118 + 287) ;end if (v96==(7 -5)) then if  not v100 then return nil;end v101=v100:FindFirstChild("ScrollingFrame");if  not v101 then return nil;end v102=v101:FindFirstChild(v95);v96=1124 -(118 + 1003) ;end if (v96==0) then if ( not v95 or (v95=="")) then return nil;end v97=v7:FindFirstChild("PlayerGui");if  not v97 then return nil;end v98=v97:FindFirstChild("ScreenStorage");v96=2 -1 ;end if (v96==1) then if  not v98 then return nil;end v99=v98:FindFirstChild("Frame");if  not v99 then return nil;end v100=v99:FindFirstChild("ContentPet");v96=379 -(142 + 235) ;end if ((31 -24)==v96) then for v295,v296 in ipairs(v105:GetDescendants()) do if (v296:IsA("TextLabel") or v296:IsA("TextButton")) then local v329=0;while true do if (v329==(0 + 0)) then v108=v107(v296);if v108 then return v108;end break;end end end end return nil;end if (v96==(981 -(553 + 424))) then v104=v103:FindFirstChild("Stat") or v103:FindFirstChildWhichIsA("Frame") ;if  not v104 then return nil;end v105=v104:FindFirstChild("Price") or v104:FindFirstChildWhichIsA("Frame") ;if  not v105 then return nil;end v96=9 -4 ;end if ((6 + 0)==v96) then v108=v107(v105);if v108 then return v108;end v109=v105:FindFirstChildWhichIsA("TextLabel") or v105:FindFirstChildWhichIsA("TextButton") ;if v109 then v108=v107(v109);if v108 then return v108;end end v96=7;end end end local v23=v23 or {create=function(v110,v111,v112) return Vector3.new(v110,v111,v112);end} ;local function v42(v113) return (v113 and (tostring(v113.X)   .. ","   .. tostring(v113.Z))) or nil ;end local function v43() local v114={};for v253,v254 in pairs(v34) do if (v254 and v254.GridCoord) then v114[v42(v254.GridCoord)]=true;end end for v255,v256 in ipairs(v22:GetChildren()) do local v257=0 + 0 ;local v258;while true do if (v257==(0 + 0)) then v258=v256:FindFirstChild("DI");if v258 then local v330=Vector3.new(v258:GetAttribute("X") or (0 + 0) ,v258:GetAttribute("Y") or 0 ,v258:GetAttribute("Z") or 0 );v114[v42(v330)]=true;end break;end end end return v114;end local function v44() local v115=0 + 0 ;local v116;while true do if (v115==(2 -1)) then return nil;end if (v115==(0 -0)) then v116=v43();for v297,v298 in ipairs(v28) do if (v298.GridCoord and  not v116[v42(v298.GridCoord)]) then return v298.GridPos;end end v115=2 -1 ;end end end local function v45(v117) local v118=0;local v119;local v120;local v121;local v122;while true do if (v118==(0 + 0)) then v119=v117 + Vector3.new(0 -0 ,953 -(239 + 514) ,0) ;v120=Vector3.new(0, -(352 + 648),0);v118=1;end if (v118==3) then if v122 then return v122.Position + Vector3.new(1329 -(797 + 532) ,1.5 + 0 ,0) ;end return v117 + Vector3.new(0,3 + 3 ,0 -0 ) ;end if (v118==1) then v121=RaycastParams.new();v121.FilterType=Enum.RaycastFilterType.Exclude;v118=1204 -(373 + 829) ;end if ((733 -(476 + 255))==v118) then v121.FilterDescendantsInstances={v7.Character};v122=workspace:Raycast(v119,v120,v121);v118=3;end end end local function v46(v123,v124) local v125=0 + 0 ;local v126;while true do if (v125==(0 -0)) then v126=v7.Character and v7.Character:FindFirstChild("HumanoidRootPart") ;if  not v126 then return;end v125=1 -0 ;end if (v125==1) then if ((v126.Position-v123).Magnitude>(v124 or 12)) then v126.CFrame=CFrame.new(v123 + Vector3.new(238 -(64 + 174) ,1.5 + 2 ,0) );task.wait(0.4 -0 );end break;end end end local function v47(v127,v128) local v129=tick();while (tick() -v129)<(v128 or 2.5)  do local v259=0;while true do if (v259==0) then if v127:FindFirstChild("DI") then return true;end task.wait(0.1);break;end end end return false;end local function v48(v130,v131) local v132=336 -(144 + 192) ;local v133;while true do if (v132==0) then v133=tick();while (tick() -v133)<(v131 or (218.5 -(42 + 174)))  do if (v34[v130]~=nil) then return true;end task.wait(0.1);end v132=1;end if (v132==1) then return false;end end end task.defer(function() local v134=0;local v135;local v136;local v137;local v138;while true do if ((0 + 0)==v134) then v135=v10:WaitForChild("Pets",30);v136=v12:WaitForChild("PetRE");v134=1 + 0 ;end if (v134==2) then while true and v3  do local v299=0 + 0 ;while true do if (v299==0) then if (v37.Pet.AutoFeed and  not v37.Waiting and (v37.Pet.AutoFeed_Type~="")) then local v369=1504 -(363 + 1141) ;local v370;while true do if (0==v369) then if  not v32 then v32=v10:FindFirstChild("Asset");end v370=v32:GetAttributes();v369=1581 -(1183 + 397) ;end if (1==v369) then for v406,v407 in pairs(v135:GetChildren()) do local v408=0 -0 ;local v409;while true do if (v408==(1 + 0)) then if (v407 and  not v407:GetAttribute("Feed")) then local v439=0 + 0 ;local v440;while true do if (v439==(1975 -(1913 + 62))) then v440=((v37.Pet.AutoFeed_Type=="BestFood") and (function() local v441=0;local v442;while true do if (v441==(0 + 0)) then v442="";for v446,v447 in ipairs(v138) do if v370[v447] then v442=v447;end end v441=1;end if (v441==(2 -1)) then return v442;end end end)()) or ((v37.Pet.AutoFeed_Type=="SelectFood") and (function() local v443=0;local v444;while true do if (v443==(1933 -(565 + 1368))) then v444="";for v448,v449 in ipairs(v26) do if (v37.Pet.AutoFeed_Foods[v449] and v370[v449]) then v444=v449;end end v443=3 -2 ;end if ((1662 -(1477 + 184))==v443) then return v444;end end end)()) ;if (v440 and (v440~="")) then local v445=0 -0 ;while true do if (v445==(0 + 0)) then v137:FireServer("Focus",v440);task.wait(0.5);v445=857 -(564 + 292) ;end if (v445==(1 -0)) then v136:FireServer("Feed",v409.UID);task.wait(0.5 -0 );v445=306 -(244 + 60) ;end if (v445==(2 + 0)) then v137:FireServer("Focus");break;end end end break;end end end break;end if (v408==(476 -(41 + 435))) then v409=v34[v407.Name] or nil ;if  not (v409 and v409.IsBig) then continue;end v408=1002 -(938 + 63) ;end end end break;end end end task.wait(v37.Pet.AutoFeed_Delay);break;end end end break;end if (v134==1) then v137=v12:WaitForChild("CharacterRE");v138=v26;v134=2 + 0 ;end end end);task.defer(function() local v139=v12:WaitForChild("CharacterRE",1155 -(936 + 189) );while true and v3  do local v260=0 + 0 ;while true do if (0==v260) then if (v37.Pet.CollectPet_Auto and  not v37.Waiting and (v37.Pet.CollectPet_Type~="All")) then local v332=v37.Pet.CollectPet_Type;if (v332=="Match Pet") then for v371,v372 in pairs(v34) do if (v372 and  not v372.IsBig and v37.Pet.CollectPet_Pets[v372.Type]) then if v372.RE then v372.RE:FireServer("Claim");end v139:FireServer("Del",v371);end end elseif (v332=="Match Mutation") then for v390,v391 in pairs(v34) do if (v391 and  not v391.IsBig and v37.Pet.CollectPet_Mutations[v391.Mutate]) then if v391.RE then v391.RE:FireServer("Claim");end v139:FireServer("Del",v390);end end elseif (v332=="Match Pet&Mutation") then for v410,v411 in pairs(v34) do if (v411 and  not v411.IsBig and v37.Pet.CollectPet_Pets[v411.Type] and v37.Pet.CollectPet_Mutations[v411.Mutate]) then local v423=1613 -(1565 + 48) ;while true do if (v423==0) then if v411.RE then v411.RE:FireServer("Claim");end v139:FireServer("Del",v410);break;end end end end elseif (v332=="Range") then local v416=tonumber(v37.Pet.CollectPet_Between.Min) or 0 ;local v417=tonumber(v37.Pet.CollectPet_Between.Max) or math.huge ;for v424,v425 in pairs(v34) do if (v425 and  not v425.IsBig) then local v435=0 + 0 ;local v436;while true do if (v435==(1138 -(782 + 356))) then v436=tonumber(v425.ProduceSpeed) or (267 -(176 + 91)) ;if ((v436>=v416) and (v436<=v417)) then if v425.RE then v425.RE:FireServer("Claim");end v139:FireServer("Del",v424);end break;end end end end end end task.wait(v37.Pet.CollectPet_Delay);break;end end end end);task.defer(function() local v140=v10:WaitForChild("Egg");while true and v3  do local v261=0 -0 ;while true do if (0==v261) then if v37.Egg.AutoHatch then for v348,v349 in pairs(v140:GetChildren()) do local v350=( #v349:GetChildren()>0) and v349:GetAttribute("D") and (v17.Value>=v349:GetAttribute("D")) ;if v350 then local v373=0 -0 ;local v374;local v375;local v376;while true do if (v373==(1092 -(975 + 117))) then v374=v16:FindFirstChild(v349.Name);v375=v374 and (v374.PrimaryPart or v374:FindFirstChild("RootPart")) ;v373=1876 -(157 + 1718) ;end if (v373==(1 + 0)) then v376=v375 and v375:FindFirstChild("RF") ;if v376 then task.spawn(function() v376:InvokeServer("Hatch");end);end break;end end end end end task.wait(v37.Egg.Hatch_Delay);break;end end end end);task.defer(function() local v141;local v142=v30 and v12:WaitForChild(tostring(v30)   .. "RE" ) ;if v29 then v141=v29:WaitForChild("Tasks");end while true and v3  do local v262=0 -0 ;while true do if (v262==(0 -0)) then if (v141 and v142 and v37.Event.AutoClaim) then for v351,v352 in pairs(v141:GetChildren()) do v142:FireServer({event="claimreward",id=v352:GetAttribute("Id")});end end task.wait(v37.Event.AutoClaim_Delay);break;end end end end);task.defer(function() local v143=1018 -(697 + 321) ;local v144;while true do if (0==v143) then v144=v12:WaitForChild("CharacterRE",81 -51 );while true and v3  do if (v37.Egg.AutoBuyEgg and  not v37.Waiting) then for v353,v354 in pairs(v35) do local v355=0 -0 ;local v356;local v357;while true do if (v355==1) then if (v37.Egg.Types[v356] and v37.Egg.Mutations[v357]) then if v144 then v144:FireServer("BuyEgg",v354.UID);end end break;end if (v355==(0 -0)) then v356=v354.Type;v357=v354.Mutate;v355=1;end end end end task.wait(v37.Egg.AutoBuyEgg_Delay);end break;end end end);task.defer(function() local v145=v12:WaitForChild("CharacterRE",30);while true and v3  do local v263=0 + 0 ;while true do if (v263==0) then if (v37.Egg.AutoPlaceEgg and  not v37.Waiting) then local v333=0 -0 ;local v334;local v335;local v336;while true do if (v333==0) then v334=nil;v335=next(v37.Egg.Types)~=nil ;v333=2 -1 ;end if (v333==(1229 -(322 + 905))) then if v334 then local v392=0;local v393;while true do if ((611 -(602 + 9))==v392) then v393=v44();if v393 then local v431=0;local v432;local v433;while true do if ((1193 -(449 + 740))==v431) then v145:FireServer("Focus");if  not v47(v334,875 -(826 + 46) ) then warn("[AutoPlaceEgg] place not confirmed (no DI).");end break;end if (v431==(947 -(245 + 702))) then v432=v45(v393);v46(v432,37 -25 );v431=1 + 0 ;end if (v431==(1900 -(260 + 1638))) then v433={"Place",{DST=v23.create(v432.X,v432.Y,v432.Z),ID=v334.Name}};print("Try place:",(v334 and v334.Name) or (petCfg and petCfg.Name) ,"DST:",v432);v431=9 -6 ;end if (v431==(3 + 0)) then v145:FireServer(unpack(v433));task.wait(0.2 -0 );v431=11 -7 ;end if (v431==1) then v145:FireServer("Focus",v334.Name);task.wait(1205.45 -(902 + 303) );v431=3 -1 ;end end end break;end end end break;end if (v333==1) then v336=next(v37.Egg.Mutations)~=nil ;for v383,v384 in ipairs(v22:GetChildren()) do if (v384 and  not v384:FindFirstChild("DI")) then local v399=v384:GetAttribute("T") or "BasicEgg" ;local v400=v384:GetAttribute("M") or "None" ;local v401= not v335 or v37.Egg.Types[v399] ;local v402= not v336 or v37.Egg.Mutations[v400] ;if (v401 and v402) then v334=v384;break;end end end v333=4 -2 ;end end end task.wait(v37.Egg.AutoPlaceEgg_Delay or 1 );break;end end end end);task.defer(function() local v146=v12:WaitForChild("CharacterRE",3 + 27 );local function v147() local v264=0;local v265;local v266;local v267;while true do if (v264==(1692 -(1121 + 569))) then for v316,v317 in ipairs(v21:GetChildren()) do local v318=214 -(22 + 192) ;local v319;while true do if (v318==0) then v319=v317.Name;if  not v34[v319] then if (v265=="All") then return v317;elseif (v265=="Match") then local v418=v317:GetAttribute("T");local v419=v317:GetAttribute("M") or "None" ;local v420= not v266 or v37.Pet.PlacePet_Types[v418] ;local v421= not v267 or v37.Pet.PlacePet_Mutations[v419] ;if (v420 and v421) then return v317;end end end break;end end end return nil;end if ((683 -(483 + 200))==v264) then v265=v37.Pet.PlacePet_Mode;v266=(v265=="Match") and (next(v37.Pet.PlacePet_Types)~=nil) ;v264=1464 -(1404 + 59) ;end if (v264==(2 -1)) then v267=(v265=="Match") and (next(v37.Pet.PlacePet_Mutations)~=nil) ;if (v265=="Range") then local v337=0 -0 ;local v338;local v339;while true do if ((766 -(468 + 297))==v337) then for v385,v386 in ipairs(v21:GetChildren()) do local v387=v386.Name;if  not v34[v387] then local v403=v41(v387);if (v403 and (v403>=v338) and (v403<=v339)) then return v386;end end end return nil;end if (v337==(562 -(334 + 228))) then v338=tonumber(v37.Pet.PlacePet_Between.Min) or (0 -0) ;v339=tonumber(v37.Pet.PlacePet_Between.Max) or math.huge ;v337=2 -1 ;end end end v264=2;end end end while true and v3  do local v268=0 -0 ;while true do if (v268==(0 + 0)) then if (v37.Pet.AutoPlacePet and  not v37.Waiting) then local v340=236 -(141 + 95) ;local v341;while true do if (v340==0) then v341=v147();if v341 then local v394=v44();if v394 then local v412=v45(v394);v46(v412,12);v146:FireServer("Focus",v341.Name);task.wait(0.45);local v413={"Place",{DST=v23.create(v412.X,v412.Y,v412.Z),ID=v341.Name}};print("Try place:",v341 and v341.Name ,"DST:",v412);v146:FireServer(unpack(v413));task.wait(0.2 -0 );v146:FireServer("Focus");if  not v48(v341.Name,6 -3 ) then warn("[AutoPlacePet] place not confirmed (no model/OwnedPets map).");end end end break;end end end task.wait(v37.Pet.AutoPlacePet_Delay or (1 + 0) );break;end end end end);task.defer(function() local v148=v10:WaitForChild("FoodStore",82 -52 ):WaitForChild("LST",22 + 8 );local v149=v12:WaitForChild("FoodStoreRE");while true and v3  do if (v37.Shop.Food.AutoBuy and  not v37.Waiting) then for v301,v302 in pairs(v148:GetAttributes()) do if ((v302>0) and v37.Shop.Food.Foods[v301]) then if v149 then v149:FireServer(v301);end end end end task.wait(v37.Shop.Food.AutoBuy_Delay);end end);v38.Root.Destroying:Once(function() local v150=0 + 0 ;while true do if ((0 -0)==v150) then v3=false;for v303,v304 in pairs(v5) do if v304 then pcall(function() v304:Disconnect();end);end end break;end end end);v1:LoadAutoloadConfig();getgenv().MeowyBuildAZoo=v38;end
+if game.PlaceId == 105555311806207 then
+    if MeowyBuildAZoo then
+        MeowyBuildAZoo:Destroy()
+    end
+    repeat task.wait(1) until game:IsLoaded()
+    local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+    local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+    local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+    local RunningEnvirontments = true
+    local GameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)["Name"] or "None"
+
+    local EnvirontmentConnections = {}
+    local Players = game:GetService("Players")
+    local Player = Players.LocalPlayer
+    local Players_InGame = {}
+    local PlayerUserID = Player.UserId
+    local Data = Player:WaitForChild("PlayerGui",60):WaitForChild("Data",60)
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local GameRemoteEvents = ReplicatedStorage:WaitForChild("Remote",30)
+    local Pet_Folder = workspace:WaitForChild("Pets")
+    local IslandName = Player:GetAttribute("AssignedIslandName")
+    local Island = workspace:WaitForChild("Art"):WaitForChild(IslandName)
+    local BlockFolder = workspace:WaitForChild("PlayerBuiltBlocks")
+    local ServerTime = ReplicatedStorage:WaitForChild("Time")
+    local InGameConfig = ReplicatedStorage:WaitForChild("Config")
+    local Egg_Belt_Folder = ReplicatedStorage:WaitForChild("Eggs"):WaitForChild(IslandName)
+    local ServerReplicatedDict = ReplicatedStorage:WaitForChild("ServerDictReplicated")
+    local OwnedPetData = Data:WaitForChild("Pets")
+    local OwnedEggData = Data:WaitForChild("Egg")
+
+    -- helper ให้เข้ากับ signature ของ Place
+    local vector = { create = function(x,y,z) return Vector3.new(x,y,z) end }
+
+    local Eggs_InGame = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
+    local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
+    local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
+    local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
+
+    -- เก็บกริดฟาร์ม
+    local Grids = {}
+    for _,grid in pairs(Island:GetDescendants()) do
+        if grid:IsA("BasePart") and string.find(tostring(grid), "Farm") then
+            table.insert(Grids, {
+                GridCoord = grid:GetAttribute("IslandCoord"),
+                GridPos = grid.Position
+            })
+        end
+    end
+
+    -- Event data
+    local EventTaskData; local ResEvent; local EventName = "None";
+    for _,Data_Folder in pairs(Data:GetChildren()) do
+        local IsEventTaskData = (tostring(Data_Folder):match("^(.*)EventTaskData$"))
+        if IsEventTaskData then EventTaskData = Data_Folder break end
+    end
+    for _,v in pairs(ReplicatedStorage:GetChildren()) do
+        local IsEventData = (tostring(v):match("^(.*)Event$"))
+        if IsEventData then ResEvent = v EventName = IsEventData break end
+    end
+
+    local InventoryData = Data:WaitForChild("Asset",30)
+    local Players_List_Updated = Instance.new("BindableEvent")
+    table.insert(EnvirontmentConnections,Players.PlayerRemoving:Connect(function(plr)
+        local idx = table.find(Players_InGame,plr.Name)
+        if idx then table.remove(Players_InGame,idx) end
+        Players_List_Updated:Fire(Players_InGame)
+    end))
+    table.insert(EnvirontmentConnections,Players.PlayerAdded:Connect(function(plr)
+        table.insert(Players_InGame,plr.Name)
+        Players_List_Updated:Fire(Players_InGame)
+    end))
+    for _,plr in pairs(Players:GetPlayers()) do
+        table.insert(Players_InGame,plr.Name)
+    end
+
+    local OwnedPets = {}
+    local Egg_Belt = {}
+    table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildRemoved:Connect(function(egg)
+        task.wait(0.1)
+        local eggUID = tostring(egg) or "None"
+        if egg and Egg_Belt[eggUID] then Egg_Belt[eggUID] = nil end
+    end))
+    table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildAdded:Connect(function(egg)
+        task.wait(0.1)
+        local eggUID = tostring(egg) or "None"
+        if egg then
+            Egg_Belt[eggUID] = {
+                UID = eggUID,
+                Mutate = (egg:GetAttribute("M") or "None"),
+                Type = (egg:GetAttribute("T") or "BasicEgg")
+            }
+        end
+    end))
+    for _,egg in pairs(Egg_Belt_Folder:GetChildren()) do
+        task.spawn(pcall,function()
+            local eggUID = tostring(egg) or "None"
+            if egg then
+                Egg_Belt[eggUID] = {
+                    UID = eggUID,
+                    Mutate = (egg:GetAttribute("M") or "None"),
+                    Type = (egg:GetAttribute("T") or "BasicEgg")
+                }
+            end
+        end)
+    end
+
+    table.insert(EnvirontmentConnections,Pet_Folder.ChildRemoved:Connect(function(pet)
+        task.wait(0.1)
+        local petUID = tostring(pet) or "None"
+        if pet and OwnedPets[petUID] then OwnedPets[petUID] = nil end
+    end))
+    local function GetCash(TXT)
+        if TXT then
+            local cash = string.gsub(TXT,"[$,]","")
+            return tonumber(cash)
+        end
+        return 0
+    end
+
+    -- Map OwnedPets พร้อม ProduceSpeed
+    table.insert(EnvirontmentConnections,Pet_Folder.ChildAdded:Connect(function(pet)
+        task.wait(0.1)
+        local petUID = tostring(pet) or "None"
+        local IsOwned = pet:GetAttribute("UserId") == PlayerUserID
+        if not IsOwned then return end
+        local petPrimaryPart = pet and (pet.PrimaryPart or pet:FindFirstChild("RootPart") or pet:WaitForChild("RootPart"))
+        local CashBillboard = petPrimaryPart and (petPrimaryPart:FindFirstChild("GUI/IdleGUI") or petPrimaryPart:WaitForChild("GUI/IdleGUI"))
+        local CashFrame = CashBillboard and (CashBillboard:FindFirstChild("CashF") or CashBillboard:WaitForChild("CashF"))
+        local CashTXT = CashFrame and (CashFrame:FindFirstChild("TXT") or CashFrame:WaitForChild("TXT"))
+        local GridCoord = OwnedPetData and OwnedPetData:WaitForChild(petUID):WaitForChild("DI")
+        GridCoord = GridCoord and Vector3.new(GridCoord:GetAttribute("X"),GridCoord:GetAttribute("Y"),GridCoord:GetAttribute("Z")) or nil
+        if pet and IsOwned then
+            OwnedPets[petUID] = setmetatable({
+                GridCoord = GridCoord, UID = petUID,
+                Type = (petPrimaryPart:GetAttribute("Type")),
+                Mutate = (petPrimaryPart:GetAttribute("Mutate")),
+                Model = pet, RootPart = petPrimaryPart,
+                RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true)),
+                IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))
+            },{
+                __index = (function(tb, ind)
+                    if ind == "Coin" then
+                        return (CashTXT and GetCash(CashTXT.Text))
+                    elseif ind == "ProduceSpeed" or ind == "PS" then
+                        return (petPrimaryPart and petPrimaryPart:GetAttribute("ProduceSpeed")) or 0
+                    end
+                    return rawget(tb, ind)
+                end)
+            })
+        end
+    end))
+    for _,pet in pairs(Pet_Folder:GetChildren()) do
+        task.spawn(pcall,function()
+            local petUID = tostring(pet) or "None"
+            local IsOwned = pet:GetAttribute("UserId") == PlayerUserID
+            if not IsOwned then return end
+            local petPrimaryPart = pet and (pet.PrimaryPart or pet:FindFirstChild("RootPart") or pet:WaitForChild("RootPart"))
+            local CashBillboard = petPrimaryPart and (petPrimaryPart:FindFirstChild("GUI/IdleGUI") or petPrimaryPart:WaitForChild("GUI/IdleGUI"))
+            local CashFrame = CashBillboard and (CashBillboard:FindFirstChild("CashF") or CashBillboard:WaitForChild("CashF"))
+            local CashTXT = CashFrame and (CashFrame:FindFirstChild("TXT") or CashFrame:WaitForChild("TXT"))
+            local GridCoord = OwnedPetData and OwnedPetData:WaitForChild(petUID):WaitForChild("DI")
+            GridCoord = GridCoord and Vector3.new(GridCoord:GetAttribute("X"),GridCoord:GetAttribute("Y"),GridCoord:GetAttribute("Z")) or nil
+            OwnedPets[petUID] = setmetatable({
+                GridCoord = GridCoord, UID = petUID,
+                Type = (petPrimaryPart:GetAttribute("Type")),
+                Mutate = (petPrimaryPart:GetAttribute("Mutate")),
+                Model = pet, RootPart = petPrimaryPart,
+                RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true)),
+                IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))
+            },{
+                __index = (function(tb, ind)
+                    if ind == "Coin" then
+                        return (CashTXT and GetCash(CashTXT.Text))
+                    elseif ind == "ProduceSpeed" or ind == "PS" then
+                        return (petPrimaryPart and petPrimaryPart:GetAttribute("ProduceSpeed")) or 0
+                    end
+                    return rawget(tb, ind)
+                end)
+            })
+        end)
+    end
+
+    local Configuration = {
+        Main = {
+            AutoCollect = false, Collect_Delay = 5,
+            Collect_Type = "Delay",
+            Collect_Between = {["Min"] = 100000,["Max"] = 1000000},
+        },
+        Pet = {
+            AutoFeed = false, AutoFeed_Foods = {},
+            AutoPlacePet = false,
+            AutoFeed_Delay = 3, AutoFeed_Type = "",
+            CollectPet_Type = "All", CollectPet_Auto = false,
+            CollectPet_Mutations = {}, CollectPet_Pets = {},
+            CollectPet_Delay = 5,
+            CollectPet_Between = {["Min"] = 100000,["Max"] = 1000000},
+
+            -- ▼▼ NEW: โหมด Range สำหรับ Auto Place Pet
+            PlacePet_Mode = "All",           -- "All" | "Match" | "Range"
+            PlacePet_Types = {},             -- ใช้เมื่อ PlacePet_Mode = "Match"
+            PlacePet_Mutations = {},         -- ใช้เมื่อ PlacePet_Mode = "Match"
+            AutoPlacePet_Delay = 1.0,
+
+            -- ▼▼ NEW: ช่วงค่าเงินต่อวิ (จาก inventory UI) สำหรับโหมด "Range"
+            PlacePet_Between = { Min = 0, Max = 1e18 },
+        },
+
+        Egg = {
+            AutoHatch = false, Hatch_Delay = 15,
+            AutoBuyEgg = false, AutoBuyEgg_Delay = 1,
+            AutoPlaceEgg = false, AutoPlaceEgg_Delay = 1.0,
+            Mutations = {}, Types = {},
+        },
+        Shop = { Food = { AutoBuy = false, AutoBuy_Delay = 1, Foods = {} } },
+        Players = {
+            SelectPlayer = "",
+            SelectType = "",
+            SendPet_Type = "All",
+            Pet_Type = {},
+            Pet_Mutations = {},
+            -- ▼ เพิ่มใหม่
+            Food_Selected = {},      -- map ของชนิดอาหารที่เลือก {Meat=true, Apple=true}
+            Food_Amounts  = {},      -- map จำนวนต่อชนิด {Meat=3, Apple=1}
+            Food_AmountPick = "",    -- ชนิดที่กำลังเลือกเพื่อกรอกจำนวน
+        },
+        
+        Event = { AutoClaim = false, AutoClaim_Delay = 3 },
+        AntiAFK = false, Waiting = false,
+    }
+
+    local Window = Fluent:CreateWindow({
+        Title = GameName, SubTitle = "by DemiGodz",
+        TabWidth = 160, Size = UDim2.fromOffset(522, 414),
+        Acrylic = true, Theme = "Dark", MinimizeKey = Enum.KeyCode.LeftControl
+    })
+
+    local Tabs = {
+        About = Window:AddTab({ Title = "About", Icon = "" }),
+        Main = Window:AddTab({ Title = "Main Features", Icon = "" }),
+        Pet = Window:AddTab({ Title = "Pet Features", Icon = "" }),
+        Egg = Window:AddTab({ Title = "Egg Features", Icon = "" }),
+        Shop = Window:AddTab({ Title = "Shop Features", Icon = "" }),
+        Event = Window:AddTab({ Title = "Event Feature", Icon = "" }),
+        Players = Window:AddTab({ Title = "Players Features", Icon = "" }),
+        Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
+    }
+
+    local Options = Fluent.Options
+
+    do
+        -- Main
+        Tabs.Main:AddSection("Main")
+        Tabs.Main:AddToggle("AutoCollect",{ Title = "Auto Collect", Default = false, Callback = function(v) Configuration.Main.AutoCollect = v end })
+        Tabs.Main:AddSection("Settings")
+        Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 5, Min = 1, Max = 30, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
+        Tabs.Main:AddDropdown("CollectCash Type",{ Title = "Select Type", Values = {"Delay","Between"}, Multi = false, Default = "Delay", Callback = function(v) Configuration.Main.Collect_Type = v end })
+        Tabs.Main:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Min = tonumber(v) end })
+        Tabs.Main:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Max = tonumber(v) end })
+
+        -- Pet
+        Tabs.Pet:AddSection("Main")
+        Tabs.Pet:AddToggle("Auto Feed",{ Title = "Auto Feed", Default = false, Callback = function(v) Configuration.Pet.AutoFeed = v end })
+        Tabs.Pet:AddToggle("Auto Collect Pet",{ Title = "Auto Collect Pet", Default = false, Callback = function(v) Configuration.Pet.CollectPet_Auto = v end })
+        Tabs.Pet:AddToggle("Auto Place Pet",{ Title = "Auto Place Pet", Default = false, Callback = function(v) Configuration.Pet.AutoPlacePet = v end })
+        Tabs.Pet:AddButton({
+            Title = "Collect Pet",
+            Description = "Collect Pets with Collect Pet Type (no BIG pet)",
+            Callback = function()
+                Window:Dialog({
+                    Title = "Collect Pet Alert", Content = "Are you sure?",
+                    Buttons = {
+                        { Title = "Yes", Callback = function()
+                            local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
+                            local CollectType = Configuration.Pet.CollectPet_Type
+                            if CollectType == "All" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
+                                    end
+                                end
+                            elseif CollectType == "Match Pet" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
+                                    end
+                                end
+                            elseif CollectType == "Match Mutation" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
+                                    end
+                                end
+                            elseif CollectType == "Match Pet&Mutation" then
+                                for UID,PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                        if PetData.RE then PetData.RE:FireServer("Claim") end
+                                        CharacterRE:FireServer("Del",UID)
+                                    end
+                                end
+                            elseif CollectType == "Range" then
+                                local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
+                                local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
+                                for UID, PetData in pairs(OwnedPets) do
+                                    if PetData and not PetData.IsBig then
+                                        local ps = tonumber(PetData.ProduceSpeed) or 0
+                                        if ps >= minV and ps <= maxV then
+                                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                                            CharacterRE:FireServer("Del", UID)
+                                        end
+                                    end
+                                end
+                            end
+                        end },
+                        { Title = "No", Callback = function() end }
+                    }
+                })
+            end
+        })
+        Tabs.Pet:AddSection("Settings")
+        Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
+        Tabs.Pet:AddSlider("AutoCollectPet Delay",{ Title = "Auto Collect Pet Delay", Default = 5, Min = 5, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.CollectPet_Delay = v end })
+        Tabs.Pet:AddDropdown("Pet Feed_Type",{ Title = "Select Type", Values = {"BestFood","SelectFood"}, Multi = false, Default = "", Callback = function(v) Configuration.Pet.AutoFeed_Type = v end })
+        Tabs.Pet:AddDropdown("Pet Feed_Food",{ Title = "Select Foods", Values = PetFoods_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.AutoFeed_Foods = v end })
+        Tabs.Pet:AddDropdown("CollectPet Type",{ Title = "Collect Pet Type", Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation","Range"}, Multi = false, Default = "All", Callback = function(v) Configuration.Pet.CollectPet_Type = v end })
+        Tabs.Pet:AddDropdown("CollectPet Pets",{ Title = "Collect Pets", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Pets = v end })
+        Tabs.Pet:AddDropdown("CollectPet Mutations",{ Title = "Collect Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Mutations = v end })
+        Tabs.Pet:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Min = tonumber(v) end })
+        Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Max = tonumber(v) end })
+        -- ====== Pet > Auto Place Pet UI ======
+        Tabs.Pet:AddSection("Auto Place Pet Settings")
+
+        Tabs.Pet:AddDropdown("PlacePet Mode", {
+            Title = "Place Mode",
+            Values = {"All","Match","Range"}, -- ▼▼ NEW: เพิ่ม "Range"
+            Multi = false,
+            Default = "All",
+            Callback = function(v)
+                Configuration.Pet.PlacePet_Mode = v
+            end
+        })
+
+        Tabs.Pet:AddDropdown("PlacePet Types", {
+            Title = "Place Types (Match)",
+            Description = "เลือกประเภทสัตว์ที่จะวาง (ใช้เมื่อ Place Mode = Match)",
+            Values = Pets_InGame,
+            Multi = true,
+            Default = {},
+            Callback = function(v)
+                Configuration.Pet.PlacePet_Types = v
+            end
+        })
+
+        Tabs.Pet:AddDropdown("PlacePet Mutations", {
+            Title = "Place Mutations (Match)",
+            Description = "เลือกมิวเทชันที่จะวาง (ใช้เมื่อ Place Mode = Match)",
+            Values = Mutations_InGame,
+            Multi = true,
+            Default = {},
+            Callback = function(v)
+                Configuration.Pet.PlacePet_Mutations = v
+            end
+        })
+
+        Tabs.Pet:AddSlider("AutoPlacePet Delay", {
+            Title = "Auto Place Pet Delay",
+            Description = "ดีเลย์การพยายามวางสัตว์ในแต่ละครั้ง (วิ)",
+            Default = 1,
+            Min = 0.1,
+            Max = 5,
+            Rounding = 1,
+            Callback = function(v)
+                Configuration.Pet.AutoPlacePet_Delay = v
+            end
+        })
+
+        -- ▼▼ NEW: ช่องกรอก Min/Max สำหรับโหมด Range
+        Tabs.Pet:AddInput("PlacePet_MinIncome", {
+            Title = "Min income/s (Range)",
+            Default = tostring(Configuration.Pet.PlacePet_Between.Min or 0),
+            Numeric = true, Finished = true,
+            Callback = function(v)
+                local n = tonumber(v) or 0
+                Configuration.Pet.PlacePet_Between.Min = n
+            end
+        })
+        Tabs.Pet:AddInput("PlacePet_MaxIncome", {
+            Title = "Max income/s (Range)",
+            Default = tostring(Configuration.Pet.PlacePet_Between.Max or 1000000),
+            Numeric = true, Finished = true,
+            Callback = function(v)
+                local n = tonumber(v) or math.huge
+                Configuration.Pet.PlacePet_Between.Max = n
+            end
+        })
+        -- ====== /Auto Place Pet UI ======
+        -- Egg
+        Tabs.Egg:AddSection("Main")
+        Tabs.Egg:AddToggle("Auto Hatch",{ Title = "Auto Hatch", Default = false, Callback = function(v) Configuration.Egg.AutoHatch = v end })
+        Tabs.Egg:AddToggle("Auto Egg",{ Title = "Auto Buy Egg", Default = false, Callback = function(v) Configuration.Egg.AutoBuyEgg = v end })
+        Tabs.Egg:AddToggle("Auto Place Egg",{ Title = "Auto Place Egg", Default = false, Callback = function(v) Configuration.Egg.AutoPlaceEgg = v end })
+        Tabs.Egg:AddSection("Settings")
+        Tabs.Egg:AddSlider("AutoHatch Delay",{ Title = "Hatch Delay", Default = 15, Min = 15, Max = 60, Rounding = 0, Callback = function(v) Configuration.Egg.Hatch_Delay = v end })
+        Tabs.Egg:AddSlider("AutoBuyEgg Delay",{ Title = "Auto Buy Egg Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Egg.AutoBuyEgg_Delay = v end })
+        Tabs.Egg:AddSlider("AutoPlaceEgg Delay",{ Title = "Auto Place Egg Delay", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Egg.AutoPlaceEgg_Delay = v end })
+        Tabs.Egg:AddDropdown("Egg Type",{ Title = "Types", Values = Eggs_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Types = v end })
+        Tabs.Egg:AddDropdown("Egg Mutations",{ Title = "Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Mutations = v end })
+
+        -- Shop
+        Tabs.Shop:AddSection("Main")
+        Tabs.Shop:AddToggle("Auto BuyFood",{ Title = "Auto Buy Food", Default = false, Callback = function(v) Configuration.Shop.Food.AutoBuy = v end })
+        Tabs.Shop:AddSection("Settings")
+        Tabs.Shop:AddSlider("AutoBuyFood Delay",{ Title = "Auto Buy Food Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Shop.Food.AutoBuy_Delay = v end })
+        Tabs.Shop:AddDropdown("Foods Dropdown",{ Title = "Foods", Values = PetFoods_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Shop.Food.Foods = v end })
+
+        -- Event
+        Tabs.Event:AddParagraph({ Title = "Event Information", Content = string.format("Current Event : %s",EventName) })
+        Tabs.Event:AddSection("Main")
+        Tabs.Event:AddToggle("Auto Claim Event Quest",{ Title = "Auto Claim", Default = false, Callback = function(v) Configuration.Event.AutoClaim = v end })
+        Tabs.Event:AddSection("Settings")
+        Tabs.Event:AddSlider("Event_AutoClaim Delay",{ Title = "Auto Claim Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Event.AutoClaim_Delay = v end })
+
+        -- Players
+        Tabs.Players:AddSection("Main")
+        Tabs.Players:AddButton({
+            Title = "Send Gift", Description = "Send Gift",
+            Callback = function()
+                Window:Dialog({
+                    Title = "Send Gift Alert", Content = "Are you sure?",
+                    Buttons = {
+                        { Title = "Yes", Callback = function()
+                            local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
+                            local GiftRE = GameRemoteEvents:WaitForChild("GiftRE")
+                            local GiftType = Configuration.Players.SelectType
+                            local GiftPlayer = Players:FindFirstChild(Configuration.Players.SelectPlayer)
+                            if not GiftPlayer then return end
+                            Configuration.Waiting = true
+                            if GiftType == "All_Pets" then
+                                for _,PetData in pairs(OwnedPetData:GetChildren()) do
+                                    if PetData and not PetData:GetAttribute("D") then
+                                        CharacterRE:FireServer("Focus",PetData.Name) task.wait(0.75)
+                                        GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                                    end
+                                end
+                            elseif GiftType == "Match Pet" then
+                                for _,PetData in pairs(OwnedPetData:GetChildren()) do
+                                    if PetData then
+                                        local petType = PetData:GetAttribute("T")
+                                        if petType and Configuration.Players.Pet_Type[petType] then
+                                            CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                                        end
+                                    end
+                                end
+                            elseif GiftType == "All_Foods" then
+                                for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
+                                    if FoodName and table.find(PetFoods_InGame,FoodName) then
+                                        for i = 1,FoodAmount do
+                                            CharacterRE:FireServer("Focus",FoodName) task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                                        end
+                                    end
+                                end
+                            elseif GiftType == "Select_Foods" then
+                                -- ส่งเฉพาะชนิดที่เลือก พร้อมจำนวนต่อชนิดจาก Food_Amounts (ดีฟอลต์ 1)
+                                if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                                local inv = InventoryData and InventoryData:GetAttributes() or {}
+                                local selected = Configuration.Players.Food_Selected or {}
+                                local amounts  = Configuration.Players.Food_Amounts  or {}
+                            
+                                for foodName, picked in pairs(selected) do
+                                    if picked and table.find(PetFoods_InGame, foodName) then
+                                        local have = tonumber(inv[foodName] or 0)
+                                        local want = tonumber(amounts[foodName] or 1)
+                                        local sendN = math.max(0, math.min(have, want))
+                            
+                                        for i = 1, sendN do
+                                            CharacterRE:FireServer("Focus", foodName)
+                                            task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer)
+                                            task.wait(0.75)
+                                        end
+                                    end
+                                end                            
+                            elseif GiftType == "All_Eggs" then
+                                for _,Egg in pairs(OwnedEggData:GetChildren()) do
+                                    if Egg and not Egg:FindFirstChild("DI") then
+                                        CharacterRE:FireServer("Focus",Egg.Name) task.wait(0.75)
+                                        GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                                    end
+                                end
+                            end
+                            Configuration.Waiting = false
+                        end },
+                        { Title = "No", Callback = function() end }
+                    }
+                })
+            end
+        })
+        Tabs.Players:AddSection("Settings")
+        local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
+        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+        -- เลือกชนิดอาหารที่จะส่ง (ใช้กับ Select_Foods)
+        Tabs.Players:AddDropdown("Gift Foods", {
+            Title = "Foods to Gift (Select)",
+            Description = "เลือกชนิดอาหารที่จะส่ง (ใช้เมื่อ Gift Type = Select_Foods)",
+            Values = PetFoods_InGame,
+            Multi = true,
+            Default = {},
+            Callback = function(v)
+                Configuration.Players.Food_Selected = v   -- map boolean
+            end,
+        })
+
+        -- เลือกชนิดที่จะ “ตั้งจำนวน”
+        local PickFoodDD = Tabs.Players:AddDropdown("Pick Food Amount", {
+            Title = "Pick Food to set amount",
+            Values = PetFoods_InGame,
+            Multi = false,
+            Default = "",
+            Callback = function(v)
+                Configuration.Players.Food_AmountPick = v
+            end,
+        })
+
+        -- กรอกจำนวนสำหรับชนิดที่เลือก
+        Tabs.Players:AddInput("Set Food Amount", {
+            Title = "Set Amount for picked food",
+            Default = 1,
+            Placeholder = "จำนวนสำหรับชนิดที่เลือก",
+            Numeric = true,
+            Finished = true,
+            Callback = function(v)
+                local food = Configuration.Players.Food_AmountPick
+                if food and food ~= "" then
+                    local n = math.max(1, math.floor(tonumber(v) or 1))
+                    Configuration.Players.Food_Amounts[food] = n
+                end
+            end,
+        })
+
+        -- ปุ่มลัด: ตั้งจำนวนเริ่มต้น (1) ให้ทุกชนิดที่เลือกไว้
+        Tabs.Players:AddButton({
+            Title = "Init amounts for selected foods",
+            Description = "ตั้งจำนวนเริ่มต้น = 1 ให้ทุกชนิดที่เลือก (ถ้ายังไม่เคยตั้ง)",
+            Callback = function()
+                for food, on in pairs(Configuration.Players.Food_Selected or {}) do
+                    if on and not Configuration.Players.Food_Amounts[food] then
+                        Configuration.Players.Food_Amounts[food] = 1
+                    end
+                end
+            end
+        })
+
+        Tabs.Players:AddDropdown("Pet Type",{ Title = "Select Pet Type", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Type = v end })
+        Tabs.Players:AddDropdown("Pet Mutations",{ Title = "Select Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Mutations = v end })
+        table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList) Players_Dropdown:SetValues(newList) end))
+
+        -- About/Settings
+        Tabs.About:AddParagraph({ Title = "Credit", Content = "Script create by DemiGodz" })
+        Tabs.Settings:AddToggle("AntiAFK",{ Title = "Anti AFK", Default = false, Callback = function(v)
+            ServerReplicatedDict:SetAttribute("AFK_THRESHOLD",(v == false and 1080 or v == true and 99999999999))
+            Configuration.AntiAFK = v
+        end })
+    end
+
+    SaveManager:SetLibrary(Fluent)
+    InterfaceManager:SetLibrary(Fluent)
+    SaveManager:IgnoreThemeSettings()
+    SaveManager:SetIgnoreIndexes({})
+    InterfaceManager:SetFolder("FluentScriptHub")
+    SaveManager:SetFolder("FluentScriptHub/"..game.PlaceId)
+    InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+    SaveManager:BuildConfigSection(Tabs.Settings)
+
+    Window:SelectTab(1)
+    Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
+
+    -- ===== Anti AFK
+    task.defer(function()
+        local VirtualUser = game:GetService("VirtualUser")
+        table.insert(EnvirontmentConnections,ServerReplicatedDict:GetAttributeChangedSignal("AFK_THRESHOLD"):Connect(function()
+            ServerReplicatedDict:SetAttribute("AFK_THRESHOLD",(Configuration.AntiAFK == false and 1080 or Configuration.AntiAFK == true and 99999999999))
+        end))
+        while true and RunningEnvirontments do
+            if Configuration.AntiAFK then
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end
+            task.wait(30)
+        end
+    end)
+
+    -- ===== Auto Collect coin from pets
+    task.defer(function()
+        local PetRE = GameRemoteEvents:WaitForChild("PetRE")
+        while true and RunningEnvirontments do
+            if Configuration.Main.AutoCollect then
+                for _,pet in pairs(OwnedPets) do
+                    local RE = pet.RE
+                    local Coin = tonumber(pet.Coin)
+                    if Configuration.Main.Collect_Type == "Delay" then
+                        if RE then RE:FireServer("Claim") end
+                    elseif Configuration.Main.Collect_Type == "Between" and (Configuration.Main.Collect_Between.Min < Coin and Coin < Configuration.Main.Collect_Between.Max) then
+                        if RE then RE:FireServer("Claim") end
+                    end
+                end
+            end
+            task.wait(Configuration.Main.Collect_Delay)
+        end
+    end)
+
+   -- ========= Helpers for placing (Egg/Pet) =========
+   -- ▼▼ NEW: อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
+  -- อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
+local function GetInventoryIncomePerSecByUID(uid: string)
+    if not uid or uid == "" then return nil end
+
+    local pg = Player:FindFirstChild("PlayerGui")
+    if not pg then return nil end
+
+    -- path: PlayerGui.ScreenStorage.Frame.ContentPet.ScrollingFrame[UID].BTN.Stat.Price.Value
+    local screenStorage = pg:FindFirstChild("ScreenStorage")
+    if not screenStorage then return nil end
+    local frame = screenStorage:FindFirstChild("Frame")
+    if not frame then return nil end
+    local contentPet = frame:FindFirstChild("ContentPet")
+    if not contentPet then return nil end
+    local scrolling = contentPet:FindFirstChild("ScrollingFrame")
+    if not scrolling then return nil end
+
+    -- หา item ตามชื่อ UID (ถ้าไม่เจอ ลองวนหาเผื่อมีการ wrap)
+    local item = scrolling:FindFirstChild(uid)
+    if not item then
+        for _, ch in ipairs(scrolling:GetChildren()) do
+            if ch.Name == uid then item = ch break end
+        end
+    end
+    if not item then return nil end
+
+    -- ลึกลงไปหา BTN/Stat/Price
+    local btn  = item:FindFirstChild("BTN") or item:FindFirstChildWhichIsA("Frame")
+    if not btn then return nil end
+    local stat = btn:FindFirstChild("Stat") or btn:FindFirstChildWhichIsA("Frame")
+    if not stat then return nil end
+    local price = stat:FindFirstChild("Price") or stat:FindFirstChildWhichIsA("Frame")
+    if not price then return nil end
+
+    -- 1) กรณีมี Value เป็น NumberValue/IntValue/StringValue
+    local valueObj = price:FindFirstChild("Value")
+    if valueObj then
+        if valueObj:IsA("NumberValue") or valueObj:IsA("IntValue") then
+            return tonumber(valueObj.Value)
+        elseif valueObj:IsA("StringValue") then
+            local s = tostring(valueObj.Value or "")
+            local n = tonumber((s:gsub("[^%d%.]", "")))
+            return n
+        end
+    end
+
+    -- 2) กรณีเป็น TextLabel/TextButton หรืออื่นๆ ที่มี property .Text เช่น "$12,345 / sec"
+    local function readText(inst)
+        local ok, txt = pcall(function() return inst.Text end) -- << ไม่ใช้ rawget
+        if ok and txt then
+            local n = tonumber((tostring(txt):gsub("[^%d%.]", "")))
+            if n then return n end
+        end
+        return nil
+    end
+    -- ลองตรงๆ ที่ Price เอง
+    local n = readText(price)
+    if n then return n end
+    -- ลองหา TextLabel/TextButton ข้างใน
+    local textLike = price:FindFirstChildWhichIsA("TextLabel") or price:FindFirstChildWhichIsA("TextButton")
+    if textLike then
+        n = readText(textLike)
+        if n then return n end
+    end
+    -- เผื่อซ้อนลึก: วนหา TextLabel ใดๆ
+    for _, d in ipairs(price:GetDescendants()) do
+        if d:IsA("TextLabel") or d:IsA("TextButton") then
+            n = readText(d)
+            if n then return n end
+        end
+    end
+
+    return nil
+end
+
+
+local vector = vector or { create = function(x,y,z) return Vector3.new(x,y,z) end }
+
+local function _ck(v) return v and (tostring(v.X)..","..tostring(v.Z)) or nil end
+
+-- กริดว่าง: จากสัตว์/ไข่ที่วางแล้ว (ดูทั้ง workspace และ Data)
+local function _occupied()
+    local occ = {}
+    for _, P in pairs(OwnedPets) do
+        if P and P.GridCoord then occ[_ck(P.GridCoord)] = true end
+    end
+    for _, E in ipairs(OwnedEggData:GetChildren()) do
+        local di = E:FindFirstChild("DI")
+        if di then
+            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
+            occ[_ck(v)] = true
+        end
+    end
+    return occ
+end
+
+local function GetFreeGridPos()
+    local occ = _occupied()
+    for _, g in ipairs(Grids) do
+        if g.GridCoord and not occ[_ck(g.GridCoord)] then
+            return g.GridPos
+        end
+    end
+    return nil
+end
+
+-- snap ให้เป็นกึ่งกลาง และ raycast หา Y “พื้นจริง”
+local function GroundAtGrid(gridPos)
+    local origin = gridPos + Vector3.new(0, 200, 0)
+    local dir = Vector3.new(0, -1000, 0)
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Exclude
+    rp.FilterDescendantsInstances = {Player.Character}
+    local hit = workspace:Raycast(origin, dir, rp)
+    if hit then return hit.Position + Vector3.new(0, 1.5, 0) end
+    return gridPos + Vector3.new(0, 6, 0)
+end
+
+local function ensureNear(position, maxDist)
+    local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if (hrp.Position - position).Magnitude > (maxDist or 12) then
+        hrp.CFrame = CFrame.new(position + Vector3.new(0, 3.5, 0))
+        task.wait(0.4)
+    end
+end
+
+-- รอผลสำเร็จ: สำหรับไข่→มี DI, สำหรับสัตว์→โมเดลไปโผล่ใน workspace.Pets
+local function waitEggPlaced(eggCfg, timeout)
+    local t0 = tick()
+    while tick() - t0 < (timeout or 2.5) do
+        if eggCfg:FindFirstChild("DI") then return true end
+        task.wait(0.1)
+    end
+    return false
+end
+
+local function waitPetPlaced(uid, timeout)
+    local t0 = tick()
+    while tick() - t0 < (timeout or 2.5) do
+        if OwnedPets[uid] ~= nil then return true end -- เรา map จาก workspace.Pets อยู่แล้ว
+        task.wait(0.1)
+    end
+    return false
+end
+-- ========= /Helpers =========
+
+
+    -- ===== Auto Feed Pet
+    task.defer(function()
+        local Data_OwnedPets = Data:WaitForChild("Pets",30)
+        local PetRE = GameRemoteEvents:WaitForChild("PetRE")
+        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
+        local FoodList = PetFoods_InGame
+        while true and RunningEnvirontments do
+            if Configuration.Pet.AutoFeed and not Configuration.Waiting and Configuration.Pet.AutoFeed_Type ~= "" then
+                if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                local Data_Inventory = InventoryData:GetAttributes()
+                for _,petCfg in pairs(Data_OwnedPets:GetChildren()) do
+                    local petModel = OwnedPets[petCfg.Name] or nil
+                    if not (petModel and petModel.IsBig) then continue end
+                    if petCfg and not petCfg:GetAttribute("Feed") then
+                        local Food = (Configuration.Pet.AutoFeed_Type == "BestFood" and (function()
+                            local best = ""
+                            for i,v in ipairs(FoodList) do if Data_Inventory[v] then best = v end end
+                            return best
+                        end)() or Configuration.Pet.AutoFeed_Type == "SelectFood" and (function()
+                            local best = ""
+                            for i,v in ipairs(PetFoods_InGame) do if Configuration.Pet.AutoFeed_Foods[v] and Data_Inventory[v] then best = v end end
+                            return best
+                        end)())
+                        if Food and Food ~= "" then
+                            CharacterRE:FireServer("Focus",Food) task.wait(0.5)
+                            PetRE:FireServer("Feed",petModel.UID) task.wait(0.5)
+                            CharacterRE:FireServer("Focus")
+                        end
+                    end
+                end
+            end
+            task.wait(Configuration.Pet.AutoFeed_Delay)
+        end
+    end)
+
+    -- ===== Auto Collect Pet (ตามโหมดที่เลือก)
+    task.defer(function()
+        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE",30)
+        while true and RunningEnvirontments do
+            if Configuration.Pet.CollectPet_Auto and not Configuration.Waiting and Configuration.Pet.CollectPet_Type ~= "All" then
+                local CollectType = Configuration.Pet.CollectPet_Type
+                if CollectType == "Match Pet" then
+                    for UID,PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del",UID)
+                        end
+                    end
+                elseif CollectType == "Match Mutation" then
+                    for UID,PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del",UID)
+                        end
+                    end
+                elseif CollectType == "Match Pet&Mutation" then
+                    for UID,PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and Configuration.Pet.CollectPet_Pets[PetData.Type] and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del",UID)
+                        end
+                    end
+                elseif CollectType == "Range" then
+                    local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
+                    local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
+                    for UID,PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig then
+                            local ps = tonumber(PetData.ProduceSpeed) or 0
+                            if ps >= minV and ps <= maxV then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end
+                                CharacterRE:FireServer("Del",UID)
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(Configuration.Pet.CollectPet_Delay)
+        end
+    end)
+
+    -- ===== Auto Hatch
+    task.defer(function()
+        local OwnedEggs = Data:WaitForChild("Egg")
+        while true and RunningEnvirontments do
+            if Configuration.Egg.AutoHatch then
+                for _,egg in pairs(OwnedEggs:GetChildren()) do
+                    local Hatchable = ((#egg:GetChildren() > 0) and egg:GetAttribute("D") and (ServerTime.Value >= egg:GetAttribute("D")))
+                    if Hatchable then
+                        local Egg = BlockFolder:FindFirstChild(egg.Name)
+                        local RootPart = Egg and (Egg.PrimaryPart or Egg:FindFirstChild("RootPart"))
+                        local RF = RootPart and RootPart:FindFirstChild("RF")
+                        if RF then task.spawn(function() RF:InvokeServer("Hatch") end) end
+                    end
+                end
+            end
+            task.wait(Configuration.Egg.Hatch_Delay)
+        end
+    end)
+
+    -- ===== Auto Claim Event Quests
+    task.defer(function()
+        local Tasks; local EventRE = ResEvent and GameRemoteEvents:WaitForChild(tostring(ResEvent).."RE")
+        if EventTaskData then Tasks = EventTaskData:WaitForChild("Tasks") end
+        while true and RunningEnvirontments do
+            if Tasks and EventRE and Configuration.Event.AutoClaim then
+                for _,Quest in pairs(Tasks:GetChildren()) do
+                    EventRE:FireServer({event = "claimreward",id = Quest:GetAttribute("Id")})
+                end
+            end
+            task.wait(Configuration.Event.AutoClaim_Delay)
+        end
+    end)
+
+    -- ===== Auto Buy Egg
+    task.defer(function()
+        local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
+        while true and RunningEnvirontments do
+            if Configuration.Egg.AutoBuyEgg and not Configuration.Waiting then
+                for _,egg in pairs(Egg_Belt) do
+                    local EggType = egg.Type
+                    local EggMutation = egg.Mutate
+                    if (Configuration.Egg.Types[EggType]) and (Configuration.Egg.Mutations[EggMutation]) then
+                        if RE then RE:FireServer("BuyEgg",egg.UID) end
+                    end
+                end
+            end
+            task.wait(Configuration.Egg.AutoBuyEgg_Delay)
+        end
+    end)
+
+        -- ===== Auto Place Egg =====
+    task.defer(function()
+        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
+        while true and RunningEnvirontments do
+            if Configuration.Egg.AutoPlaceEgg and not Configuration.Waiting then
+                -- เลือกไข่ยังไม่วาง + ผ่านฟิลเตอร์ (ว่าง = ผ่านทั้งหมด)
+                local chosenEgg
+                local typeOn = next(Configuration.Egg.Types) ~= nil
+                local mutOn  = next(Configuration.Egg.Mutations) ~= nil
+                for _, egg in ipairs(OwnedEggData:GetChildren()) do
+                    if egg and not egg:FindFirstChild("DI") then
+                        local t = egg:GetAttribute("T") or "BasicEgg"
+                        local m = egg:GetAttribute("M") or "None"
+                        local okT = (not typeOn) or Configuration.Egg.Types[t]
+                        local okM = (not mutOn)  or Configuration.Egg.Mutations[m]
+                        if okT and okM then chosenEgg = egg break end
+                    end
+                end
+
+                if chosenEgg then
+                    local grid = GetFreeGridPos()
+                    if grid then
+                        local dst = GroundAtGrid(grid)
+
+                        -- เข้าใกล้จุด, โฟกัสถือไข่
+                        ensureNear(dst, 12)
+                        CharacterRE:FireServer("Focus", chosenEgg.Name)
+                        task.wait(0.45)
+
+                        -- ส่งแบบ args + unpack (ตามที่เกมใช้)
+                        local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = chosenEgg.Name } }
+                        print("Try place:", chosenEgg and chosenEgg.Name or petCfg and petCfg.Name, "DST:", dst)
+
+                        CharacterRE:FireServer(unpack(args))
+
+                        task.wait(0.2)
+                        CharacterRE:FireServer("Focus") -- un-focus
+
+                        -- ยืนยันผล
+                        if not waitEggPlaced(chosenEgg, 3) then
+                            warn("[AutoPlaceEgg] place not confirmed (no DI).")
+                        end
+                    end
+                end
+            end
+            task.wait(Configuration.Egg.AutoPlaceEgg_Delay or 1.0)
+        end
+    end)
+
+
+        -- ===== Auto Place Pet =====
+        task.defer(function()
+            local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
+    
+            local function pickPet()
+                local mode = Configuration.Pet.PlacePet_Mode
+                local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types) ~= nil)
+                local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
+    
+                if mode == "Range" then
+                    local minV = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
+                    local maxV = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
+    
+                    -- เลือก “สัตว์ในกระเป๋า” (ยังไม่ถูกวาง => ไม่มีใน OwnedPets)
+                    -- ที่ income/s จาก UI อยู่ในช่วง [minV, maxV]
+                    for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+                        local uid = petCfg.Name
+                        if not OwnedPets[uid] then
+                            local inc = GetInventoryIncomePerSecByUID(uid)
+                            if inc and inc >= minV and inc <= maxV then
+                                return petCfg
+                            end
+                        end
+                    end
+                    return nil
+                end
+    
+                -- เดิม: All/Match
+                for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+                    local uid = petCfg.Name
+                    if not OwnedPets[uid] then
+                        if mode == "All" then
+                            return petCfg
+                        elseif mode == "Match" then
+                            local t = petCfg:GetAttribute("T")
+                            local m = petCfg:GetAttribute("M") or "None"
+                            local okT = (not typeOn) or Configuration.Pet.PlacePet_Types[t]
+                            local okM = (not mutOn)  or Configuration.Pet.PlacePet_Mutations[m]
+                            if okT and okM then return petCfg end
+                        end
+                    end
+                end
+                return nil
+            end
+    
+            while true and RunningEnvirontments do
+                if Configuration.Pet.AutoPlacePet and not Configuration.Waiting then
+                    local petCfg = pickPet()
+                    if petCfg then
+                        local grid = GetFreeGridPos()
+                        if grid then
+                            local dst = GroundAtGrid(grid)
+    
+                            ensureNear(dst, 12)
+                            CharacterRE:FireServer("Focus", petCfg.Name)
+                            task.wait(0.45)
+    
+                            local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name } }
+                            print("Try place:", petCfg and petCfg.Name, "DST:", dst)
+                            CharacterRE:FireServer(unpack(args))
+    
+                            task.wait(0.2)
+                            CharacterRE:FireServer("Focus")
+    
+                            if not waitPetPlaced(petCfg.Name, 3) then
+                                warn("[AutoPlacePet] place not confirmed (no model/OwnedPets map).")
+                            end
+                        end
+                    end
+                end
+                task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
+            end
+        end)
+    
+
+    -- ===== /Auto Place Pet =====
+
+
+    -- ===== Auto Buy Food
+    task.defer(function()
+        local FoodList = Data:WaitForChild("FoodStore",30):WaitForChild("LST",30)
+        local RE = GameRemoteEvents:WaitForChild("FoodStoreRE")
+        while true and RunningEnvirontments do
+            if Configuration.Shop.Food.AutoBuy and not Configuration.Waiting then
+                for foodName,stockAmount in pairs(FoodList:GetAttributes()) do
+                    if stockAmount > 0 and Configuration.Shop.Food.Foods[foodName] then
+                        if RE then RE:FireServer(foodName) end
+                    end
+                end
+            end
+            task.wait(Configuration.Shop.Food.AutoBuy_Delay)
+        end
+    end)
+
+    -- ===== Cleanup
+    Window.Root.Destroying:Once(function()
+        RunningEnvirontments = false
+        for _,connection in pairs(EnvirontmentConnections) do
+            if connection then pcall(function() connection:Disconnect() end) end
+        end
+    end)
+
+    SaveManager:LoadAutoloadConfig()
+    getgenv().MeowyBuildAZoo = Window
+end
