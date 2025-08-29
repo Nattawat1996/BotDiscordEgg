@@ -30,6 +30,82 @@ if game.PlaceId == 105555311806207 then
     local OwnedEggData = Data:WaitForChild("Egg")
 
     -- helper ให้เข้ากับ signature ของ Place
+       -- ========= Helpers for placing (Egg/Pet) =========
+   -- ▼▼ NEW: อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
+  -- อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
+local function GetInventoryIncomePerSecByUID(uid: string)
+    if not uid or uid == "" then return nil end
+
+    local pg = Player:FindFirstChild("PlayerGui")
+    if not pg then return nil end
+
+    -- path: PlayerGui.ScreenStorage.Frame.ContentPet.ScrollingFrame[UID].BTN.Stat.Price.Value
+    local screenStorage = pg:FindFirstChild("ScreenStorage")
+    if not screenStorage then return nil end
+    local frame = screenStorage:FindFirstChild("Frame")
+    if not frame then return nil end
+    local contentPet = frame:FindFirstChild("ContentPet")
+    if not contentPet then return nil end
+    local scrolling = contentPet:FindFirstChild("ScrollingFrame")
+    if not scrolling then return nil end
+
+    -- หา item ตามชื่อ UID (ถ้าไม่เจอ ลองวนหาเผื่อมีการ wrap)
+    local item = scrolling:FindFirstChild(uid)
+    if not item then
+        for _, ch in ipairs(scrolling:GetChildren()) do
+            if ch.Name == uid then item = ch break end
+        end
+    end
+    if not item then return nil end
+
+    -- ลึกลงไปหา BTN/Stat/Price
+    local btn  = item:FindFirstChild("BTN") or item:FindFirstChildWhichIsA("Frame")
+    if not btn then return nil end
+    local stat = btn:FindFirstChild("Stat") or btn:FindFirstChildWhichIsA("Frame")
+    if not stat then return nil end
+    local price = stat:FindFirstChild("Price") or stat:FindFirstChildWhichIsA("Frame")
+    if not price then return nil end
+
+    -- 1) กรณีมี Value เป็น NumberValue/IntValue/StringValue
+    local valueObj = price:FindFirstChild("Value")
+    if valueObj then
+        if valueObj:IsA("NumberValue") or valueObj:IsA("IntValue") then
+            return tonumber(valueObj.Value)
+        elseif valueObj:IsA("StringValue") then
+            local s = tostring(valueObj.Value or "")
+            local n = tonumber((s:gsub("[^%d%.]", "")))
+            return n
+        end
+    end
+
+    -- 2) กรณีเป็น TextLabel/TextButton หรืออื่นๆ ที่มี property .Text เช่น "$12,345 / sec"
+    local function readText(inst)
+        local ok, txt = pcall(function() return inst.Text end) -- << ไม่ใช้ rawget
+        if ok and txt then
+            local n = tonumber((tostring(txt):gsub("[^%d%.]", "")))
+            if n then return n end
+        end
+        return nil
+    end
+    -- ลองตรงๆ ที่ Price เอง
+    local n = readText(price)
+    if n then return n end
+    -- ลองหา TextLabel/TextButton ข้างใน
+    local textLike = price:FindFirstChildWhichIsA("TextLabel") or price:FindFirstChildWhichIsA("TextButton")
+    if textLike then
+        n = readText(textLike)
+        if n then return n end
+    end
+    -- เผื่อซ้อนลึก: วนหา TextLabel ใดๆ
+    for _, d in ipairs(price:GetDescendants()) do
+        if d:IsA("TextLabel") or d:IsA("TextButton") then
+            n = readText(d)
+            if n then return n end
+        end
+    end
+
+    return nil
+end
     local vector = { create = function(x,y,z) return Vector3.new(x,y,z) end }
 
     local Eggs_InGame = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
@@ -203,7 +279,7 @@ if game.PlaceId == 105555311806207 then
             AutoPlacePet_Delay = 1.0,
 
             -- ▼▼ NEW: ช่วงค่าเงินต่อวิ (จาก inventory UI) สำหรับโหมด "Range"
-            PlacePet_Between = { Min = 0, Max = 1e18 },
+            PlacePet_Between = { Min = 0, Max = 1000000 },
         },
 
         Egg = {
@@ -211,7 +287,10 @@ if game.PlaceId == 105555311806207 then
             AutoBuyEgg = false, AutoBuyEgg_Delay = 1,
             AutoPlaceEgg = false, AutoPlaceEgg_Delay = 1.0,
             Mutations = {}, Types = {},
+            CheckMinCoin = false,     -- ใช้ toggle เปิด/ปิดการเช็ค
+            MinCoin = 0,              -- ★ กำหนดเป็น "จำนวน" ไม่ใช่ตาราง
         },
+        
         Shop = { Food = { AutoBuy = false, AutoBuy_Delay = 1, Foods = {} } },
         Players = {
             SelectPlayer = "",
@@ -220,10 +299,14 @@ if game.PlaceId == 105555311806207 then
             Pet_Type = {},
             Pet_Mutations = {},
             -- ▼ เพิ่มใหม่
-            Food_Selected = {},      -- map ของชนิดอาหารที่เลือก {Meat=true, Apple=true}
-            Food_Amounts  = {},      -- map จำนวนต่อชนิด {Meat=3, Apple=1}
-            Food_AmountPick = "",    -- ชนิดที่กำลังเลือกเพื่อกรอกจำนวน
+            Food_Selected = {},
+            Food_Amounts  = {},
+            Food_AmountPick = "",
+        
+            -- ▼▼ NEW: ช่วงรายได้ต่อวินาที สำหรับโหมดส่งสัตว์แบบ Range
+            GiftPet_Between = { Min = 0, Max = 1000000 },
         },
+        
         
         Event = { AutoClaim = false, AutoClaim_Delay = 3 },
         AntiAFK = false, Waiting = false,
@@ -402,12 +485,22 @@ if game.PlaceId == 105555311806207 then
         Tabs.Egg:AddToggle("Auto Hatch",{ Title = "Auto Hatch", Default = false, Callback = function(v) Configuration.Egg.AutoHatch = v end })
         Tabs.Egg:AddToggle("Auto Egg",{ Title = "Auto Buy Egg", Default = false, Callback = function(v) Configuration.Egg.AutoBuyEgg = v end })
         Tabs.Egg:AddToggle("Auto Place Egg",{ Title = "Auto Place Egg", Default = false, Callback = function(v) Configuration.Egg.AutoPlaceEgg = v end })
+        Tabs.Egg:AddToggle("CheckMinCoin",{ Title = "Check Min Coin", Default = false, Callback = function(v) Configuration.Egg.CheckMinCoin = v end })
         Tabs.Egg:AddSection("Settings")
         Tabs.Egg:AddSlider("AutoHatch Delay",{ Title = "Hatch Delay", Default = 15, Min = 15, Max = 60, Rounding = 0, Callback = function(v) Configuration.Egg.Hatch_Delay = v end })
         Tabs.Egg:AddSlider("AutoBuyEgg Delay",{ Title = "Auto Buy Egg Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Egg.AutoBuyEgg_Delay = v end })
         Tabs.Egg:AddSlider("AutoPlaceEgg Delay",{ Title = "Auto Place Egg Delay", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Egg.AutoPlaceEgg_Delay = v end })
         Tabs.Egg:AddDropdown("Egg Type",{ Title = "Types", Values = Eggs_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Types = v end })
         Tabs.Egg:AddDropdown("Egg Mutations",{ Title = "Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Mutations = v end })
+        Tabs.Egg:AddInput("Min Coin to Buy", {
+            Title = "Min Coin",
+            Default = tostring(Configuration.Egg.MinCoin or 0),
+            Numeric = true,
+            Finished = true,
+            Callback = function(v)
+                Configuration.Egg.MinCoin = tonumber(v) or 0
+            end
+        })
 
         -- Shop
         Tabs.Shop:AddSection("Main")
@@ -443,6 +536,26 @@ if game.PlaceId == 105555311806207 then
                                     if PetData and not PetData:GetAttribute("D") then
                                         CharacterRE:FireServer("Focus",PetData.Name) task.wait(0.75)
                                         GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                                    end
+                                end
+                            elseif GiftType == "Range_Pets" then
+                                -- ส่งเฉพาะ “สัตว์ในกระเป๋า” ที่รายได้ต่อวิอยู่ระหว่าง Min/Max
+                                local minV = tonumber(Configuration.Players.GiftPet_Between.Min) or 0
+                                local maxV = tonumber(Configuration.Players.GiftPet_Between.Max) or math.huge
+                            
+                                for _, PetData in pairs(OwnedPetData:GetChildren()) do
+                                    if PetData and not PetData:GetAttribute("D") then
+                                        local uid = PetData.Name
+                                        -- ไม่สนใจตัวที่ “ถูกวางอยู่แล้ว” (มีใน OwnedPets) ให้ส่งเฉพาะที่ยังอยู่ในกระเป๋า
+                                        if not OwnedPets[uid] then
+                                            local inc = GetInventoryIncomePerSecByUID(uid)
+                                            if inc and inc >= minV and inc <= maxV then
+                                                CharacterRE:FireServer("Focus", uid)
+                                                task.wait(0.75)
+                                                GiftRE:FireServer(GiftPlayer)
+                                                task.wait(0.75)
+                                            end
+                                        end
                                     end
                                 end
                             elseif GiftType == "Match Pet" then
@@ -502,7 +615,25 @@ if game.PlaceId == 105555311806207 then
         })
         Tabs.Players:AddSection("Settings")
         local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
-        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+                -- ▼▼ NEW: ช่องกรอก Min/Max สำหรับ “Range_Pets”
+        Tabs.Players:AddInput("GiftPet_MinIncome", {
+            Title = "Min income/s (for Range_Pets)",
+            Default = tostring(Configuration.Players.GiftPet_Between.Min or 0),
+            Numeric = true, Finished = true,
+            Callback = function(v)
+                Configuration.Players.GiftPet_Between.Min = tonumber(v) or 0
+            end
+        })
+        Tabs.Players:AddInput("GiftPet_MaxIncome", {
+            Title = "Max income/s (for Range_Pets)",
+            Default = tostring(Configuration.Players.GiftPet_Between.Max or 1000000),
+            Numeric = true, Finished = true,
+            Callback = function(v)
+                Configuration.Players.GiftPet_Between.Max = tonumber(v) or 1000000
+            end
+        })
+
         -- เลือกชนิดอาหารที่จะส่ง (ใช้กับ Select_Foods)
         Tabs.Players:AddDropdown("Gift Foods", {
             Title = "Foods to Gift (Select)",
@@ -613,82 +744,7 @@ if game.PlaceId == 105555311806207 then
         end
     end)
 
-   -- ========= Helpers for placing (Egg/Pet) =========
-   -- ▼▼ NEW: อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
-  -- อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
-local function GetInventoryIncomePerSecByUID(uid: string)
-    if not uid or uid == "" then return nil end
 
-    local pg = Player:FindFirstChild("PlayerGui")
-    if not pg then return nil end
-
-    -- path: PlayerGui.ScreenStorage.Frame.ContentPet.ScrollingFrame[UID].BTN.Stat.Price.Value
-    local screenStorage = pg:FindFirstChild("ScreenStorage")
-    if not screenStorage then return nil end
-    local frame = screenStorage:FindFirstChild("Frame")
-    if not frame then return nil end
-    local contentPet = frame:FindFirstChild("ContentPet")
-    if not contentPet then return nil end
-    local scrolling = contentPet:FindFirstChild("ScrollingFrame")
-    if not scrolling then return nil end
-
-    -- หา item ตามชื่อ UID (ถ้าไม่เจอ ลองวนหาเผื่อมีการ wrap)
-    local item = scrolling:FindFirstChild(uid)
-    if not item then
-        for _, ch in ipairs(scrolling:GetChildren()) do
-            if ch.Name == uid then item = ch break end
-        end
-    end
-    if not item then return nil end
-
-    -- ลึกลงไปหา BTN/Stat/Price
-    local btn  = item:FindFirstChild("BTN") or item:FindFirstChildWhichIsA("Frame")
-    if not btn then return nil end
-    local stat = btn:FindFirstChild("Stat") or btn:FindFirstChildWhichIsA("Frame")
-    if not stat then return nil end
-    local price = stat:FindFirstChild("Price") or stat:FindFirstChildWhichIsA("Frame")
-    if not price then return nil end
-
-    -- 1) กรณีมี Value เป็น NumberValue/IntValue/StringValue
-    local valueObj = price:FindFirstChild("Value")
-    if valueObj then
-        if valueObj:IsA("NumberValue") or valueObj:IsA("IntValue") then
-            return tonumber(valueObj.Value)
-        elseif valueObj:IsA("StringValue") then
-            local s = tostring(valueObj.Value or "")
-            local n = tonumber((s:gsub("[^%d%.]", "")))
-            return n
-        end
-    end
-
-    -- 2) กรณีเป็น TextLabel/TextButton หรืออื่นๆ ที่มี property .Text เช่น "$12,345 / sec"
-    local function readText(inst)
-        local ok, txt = pcall(function() return inst.Text end) -- << ไม่ใช้ rawget
-        if ok and txt then
-            local n = tonumber((tostring(txt):gsub("[^%d%.]", "")))
-            if n then return n end
-        end
-        return nil
-    end
-    -- ลองตรงๆ ที่ Price เอง
-    local n = readText(price)
-    if n then return n end
-    -- ลองหา TextLabel/TextButton ข้างใน
-    local textLike = price:FindFirstChildWhichIsA("TextLabel") or price:FindFirstChildWhichIsA("TextButton")
-    if textLike then
-        n = readText(textLike)
-        if n then return n end
-    end
-    -- เผื่อซ้อนลึก: วนหา TextLabel ใดๆ
-    for _, d in ipairs(price:GetDescendants()) do
-        if d:IsA("TextLabel") or d:IsA("TextButton") then
-            n = readText(d)
-            if n then return n end
-        end
-    end
-
-    return nil
-end
 
 
 local vector = vector or { create = function(x,y,z) return Vector3.new(x,y,z) end }
@@ -879,19 +935,37 @@ end
     -- ===== Auto Buy Egg
     task.defer(function()
         local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
+        -- asset node ของเหรียญ
+        local function currentCoin()
+            local asset = InventoryData or Data:FindFirstChild("Asset")
+            if not asset then return 0 end
+            return tonumber(asset:GetAttribute("Coin") or 0) or 0
+        end
+
         while true and RunningEnvirontments do
             if Configuration.Egg.AutoBuyEgg and not Configuration.Waiting then
-                for _,egg in pairs(Egg_Belt) do
-                    local EggType = egg.Type
-                    local EggMutation = egg.Mutate
-                    if (Configuration.Egg.Types[EggType]) and (Configuration.Egg.Mutations[EggMutation]) then
-                        if RE then RE:FireServer("BuyEgg",egg.UID) end
+                -- ตรวจสอบเหรียญขั้นต่ำ (ถ้าเปิดใช้)
+                local coinOk = (not Configuration.Egg.CheckMinCoin)
+                    or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0))
+
+                if coinOk then
+                    for _,egg in pairs(Egg_Belt) do
+                        local EggType = egg.Type
+                        local EggMutation = egg.Mutate
+                        if (Configuration.Egg.Types[EggType]) and (Configuration.Egg.Mutations[EggMutation]) then
+                            if RE then RE:FireServer("BuyEgg", egg.UID) end
+                        end
                     end
+                else
+                    -- (optional) แจ้งเตือนครั้งคราวในคอนโซล
+                    -- print(("[AutoBuyEgg] coin not enough: %s / need %s")
+                    --   :format(currentCoin(), Configuration.Egg.MinCoin))
                 end
             end
             task.wait(Configuration.Egg.AutoBuyEgg_Delay)
         end
     end)
+
 
         -- ===== Auto Place Egg =====
     task.defer(function()
