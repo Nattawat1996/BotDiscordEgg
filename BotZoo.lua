@@ -152,15 +152,34 @@ end
     end
     
     -- เก็บกริดฟาร์ม
-    local Grids = {}
-    for _,grid in pairs(Island:GetDescendants()) do
-        if grid:IsA("BasePart") and string.find(tostring(grid), "Farm") then
-            table.insert(Grids, {
-                GridCoord = grid:GetAttribute("IslandCoord"),
-                GridPos = grid.Position
-            })
+        -- ===== Scan grids (Land vs Water) =====
+    local LandGrids, WaterGrids = {}, {}
+    local function isWaterName(s) return s and s:find("WaterFarm") ~= nil end
+    local function isLandName(s)  return s and (s:find("Farm") ~= nil) and not isWaterName(s) end
+    -- (กัน false positive: ตรวจ WaterFarm ก่อน แล้วค่อย Farm)
+
+    for _, grid in ipairs(Island:GetDescendants()) do
+        if grid:IsA("BasePart") then
+            local n = tostring(grid.Name or grid)
+            if isWaterName(n) then
+                table.insert(WaterGrids, {
+                    GridCoord = grid:GetAttribute("IslandCoord"),
+                    GridPos   = grid.Position
+                })
+            elseif isLandName(n) then
+                table.insert(LandGrids, {
+                    GridCoord = grid:GetAttribute("IslandCoord"),
+                    GridPos   = grid.Position
+                })
+            end
         end
     end
+
+-- รวมเผื่อใช้กรณี Any
+local AllGrids = {}
+for _,g in ipairs(LandGrids)  do table.insert(AllGrids, g) end
+for _,g in ipairs(WaterGrids) do table.insert(AllGrids, g) end
+
 
     -- Event data
     local EventTaskData; local ResEvent; local EventName = "None";
@@ -297,7 +316,7 @@ end
 
     local Configuration = {
         Main = {
-            AutoCollect = false, Collect_Delay = 5,
+            AutoCollect = false, Collect_Delay = 30,
             Collect_Type = "Delay",
             Collect_Between = {["Min"] = 100000,["Max"] = 1000000},
         },
@@ -318,6 +337,7 @@ end
 
             -- ▼▼ NEW: ช่วงค่าเงินต่อวิ (จาก inventory UI) สำหรับโหมด "Range"
             PlacePet_Between = { Min = 0, Max = 1000000 },
+            PlaceArea = "Any", -- "Any" | "Land" | "Water"
         },
 
         Egg = {
@@ -327,6 +347,7 @@ end
             Mutations = {}, Types = {},
             CheckMinCoin = false,     -- ใช้ toggle เปิด/ปิดการเช็ค
             MinCoin = 0,              -- ★ กำหนดเป็น "จำนวน" ไม่ใช่ตาราง
+            PlaceArea = "Any", -- "Any" | "Land" | "Water"
         },
         
         Shop = { Food = { AutoBuy = false, AutoBuy_Delay = 1, Foods = {} } },
@@ -380,7 +401,7 @@ end
         Tabs.Main:AddSection("Main")
         Tabs.Main:AddToggle("AutoCollect",{ Title = "Auto Collect", Default = false, Callback = function(v) Configuration.Main.AutoCollect = v end })
         Tabs.Main:AddSection("Settings")
-        Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 5, Min = 1, Max = 30, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
+        Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 5, Min = 30, Max = 180, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
         Tabs.Main:AddDropdown("CollectCash Type",{ Title = "Select Type", Values = {"Delay","Between"}, Multi = false, Default = "Delay", Callback = function(v) Configuration.Main.Collect_Type = v end })
         Tabs.Main:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Min = tonumber(v) end })
         Tabs.Main:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Max = tonumber(v) end })
@@ -459,7 +480,13 @@ end
         Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Max = tonumber(v) end })
         -- ====== Pet > Auto Place Pet UI ======
         Tabs.Pet:AddSection("Auto Place Pet Settings")
-
+        Tabs.Pet:AddDropdown("PlacePet Area", {
+            Title = "Place Area (Pet)",
+            Values = {"Any","Land","Water"},
+            Multi = false,
+            Default = "Any",
+            Callback = function(v) Configuration.Pet.PlaceArea = v end
+        })
         Tabs.Pet:AddDropdown("PlacePet Mode", {
             Title = "Place Mode",
             Values = {"All","Match","Range"}, -- ▼▼ NEW: เพิ่ม "Range"
@@ -534,6 +561,14 @@ end
         Tabs.Egg:AddSlider("AutoHatch Delay",{ Title = "Hatch Delay", Default = 15, Min = 15, Max = 60, Rounding = 0, Callback = function(v) Configuration.Egg.Hatch_Delay = v end })
         Tabs.Egg:AddSlider("AutoBuyEgg Delay",{ Title = "Auto Buy Egg Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Egg.AutoBuyEgg_Delay = v end })
         Tabs.Egg:AddSlider("AutoPlaceEgg Delay",{ Title = "Auto Place Egg Delay", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Egg.AutoPlaceEgg_Delay = v end })
+        Tabs.Egg:AddDropdown("PlaceEgg Area", {
+            Title = "Place Area (Egg)",
+            Values = {"Any","Land","Water"},
+            Multi = false,
+            Default = "Any",
+            Callback = function(v) Configuration.Egg.PlaceArea = v end
+        })
+        
         Tabs.Egg:AddDropdown("Egg Type",{ Title = "Types", Values = Eggs_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Types = v end })
         Tabs.Egg:AddDropdown("Egg Mutations",{ Title = "Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Mutations = v end })
         Tabs.Egg:AddInput("Min Coin to Buy", {
@@ -844,6 +879,7 @@ local vector = vector or { create = function(x,y,z) return Vector3.new(x,y,z) en
 local function _ck(v) return v and (tostring(v.X)..","..tostring(v.Z)) or nil end
 
 -- กริดว่าง: จากสัตว์/ไข่ที่วางแล้ว (ดูทั้ง workspace และ Data)
+
 local function _occupied()
     local occ = {}
     for _, P in pairs(OwnedPets) do
@@ -859,15 +895,23 @@ local function _occupied()
     return occ
 end
 
-local function GetFreeGridPos()
+local function pickGridList(area)
+    if area == "Land"  then return LandGrids
+    elseif area == "Water" then return WaterGrids
+    else return AllGrids end -- Any
+end
+
+local function GetFreeGridPos(area)
     local occ = _occupied()
-    for _, g in ipairs(Grids) do
+    local list = pickGridList(area)
+    for _, g in ipairs(list) do
         if g.GridCoord and not occ[_ck(g.GridCoord)] then
             return g.GridPos
         end
     end
     return nil
 end
+
 
 -- snap ให้เป็นกึ่งกลาง และ raycast หา Y “พื้นจริง”
 local function GroundAtGrid(gridPos)
@@ -1079,7 +1123,7 @@ end
                 end
 
                 if chosenEgg then
-                    local grid = GetFreeGridPos()
+                    local grid = GetFreeGridPos(Configuration.Egg.PlaceArea)
                     if grid then
                         local dst = GroundAtGrid(grid)
 
@@ -1109,79 +1153,101 @@ end
     end)
 
 
-        -- ===== Auto Place Pet =====
-        task.defer(function()
-            local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
-    
-            local function pickPet()
-                local mode = Configuration.Pet.PlacePet_Mode
-                local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types) ~= nil)
-                local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
-    
-                if mode == "Range" then
-                    local minV = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
-                    local maxV = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
-    
-                    -- เลือก “สัตว์ในกระเป๋า” (ยังไม่ถูกวาง => ไม่มีใน OwnedPets)
-                    -- ที่ income/s จาก UI อยู่ในช่วง [minV, maxV]
-                    for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
-                        local uid = petCfg.Name
-                        if not OwnedPets[uid] then
-                            local inc = GetInventoryIncomePerSecByUID(uid)
-                            if inc and inc >= minV and inc <= maxV then
-                                return petCfg
-                            end
-                        end
-                    end
-                    return nil
+-- ===== Auto Place Pet =====
+task.defer(function()
+    local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
+
+    -- อ่านรายได้/วิ จาก UI; ถ้า nil ให้ถือเป็น 0
+    local function incomeOf(uid: string)
+        local inc = GetInventoryIncomePerSecByUID(uid)
+        return tonumber(inc) or 0
+    end
+
+    -- รวบรวม + เรียงลำดับ (desc) ตาม income/s แล้วคืน petCfg ตัวบนสุด
+    local function pickPet()
+        local mode   = Configuration.Pet.PlacePet_Mode            -- "All" | "Match" | "Range"
+        local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types)     ~= nil)
+        local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
+
+        local minV, maxV = 0, math.huge
+        if mode == "Range" then
+            minV = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
+            maxV = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
+        end
+
+        -- เก็บ candidate: { cfg = petCfg, inc = number }
+        local candidates = {}
+
+        for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+            local uid = petCfg.Name
+            -- “ยังไม่ถูกวาง” = ไม่มีอยู่ในตาราง OwnedPets
+            if not OwnedPets[uid] then
+                local pass = false
+
+                if mode == "All" then
+                    pass = true
+
+                elseif mode == "Match" then
+                    local t = petCfg:GetAttribute("T")
+                    local m = petCfg:GetAttribute("M") or "None"
+                    local okT = (not typeOn) or Configuration.Pet.PlacePet_Types[t]
+                    local okM = (not mutOn)  or Configuration.Pet.PlacePet_Mutations[m]
+                    pass = (okT and okM)
+
+                elseif mode == "Range" then
+                    local inc = incomeOf(uid)
+                    pass = (inc >= minV and inc <= maxV)
                 end
-    
-                -- เดิม: All/Match
-                for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
-                    local uid = petCfg.Name
-                    if not OwnedPets[uid] then
-                        if mode == "All" then
-                            return petCfg
-                        elseif mode == "Match" then
-                            local t = petCfg:GetAttribute("T")
-                            local m = petCfg:GetAttribute("M") or "None"
-                            local okT = (not typeOn) or Configuration.Pet.PlacePet_Types[t]
-                            local okM = (not mutOn)  or Configuration.Pet.PlacePet_Mutations[m]
-                            if okT and okM then return petCfg end
-                        end
-                    end
+
+                if pass then
+                    table.insert(candidates, { cfg = petCfg, inc = incomeOf(uid) })
                 end
-                return nil
             end
-    
-            while true and RunningEnvirontments do
-                if Configuration.Pet.AutoPlacePet and not Configuration.Waiting then
-                    local petCfg = pickPet()
-                    if petCfg then
-                        local grid = GetFreeGridPos()
-                        if grid then
-                            local dst = GroundAtGrid(grid)
-    
-                            ensureNear(dst, 12)
-                            CharacterRE:FireServer("Focus", petCfg.Name)
-                            task.wait(0.45)
-    
-                            local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name } }
-                            print("Try place:", petCfg and petCfg.Name, "DST:", dst)
-                            CharacterRE:FireServer(unpack(args))
-    
-                            task.wait(0.2)
-                            CharacterRE:FireServer("Focus")
-    
-                            if not waitPetPlaced(petCfg.Name, 3) then
-                                warn("[AutoPlacePet] place not confirmed (no model/OwnedPets map).")
-                            end
-                        end
-                    end
-                end
-                task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
-            end
+        end
+
+        if #candidates == 0 then
+            return nil
+        end
+
+        -- เรียงจากมาก -> น้อย
+        table.sort(candidates, function(a, b)
+            return (a.inc or 0) > (b.inc or 0)
         end)
+
+        -- คืนตัวที่รายได้/วิ สูงสุด
+        return candidates[1].cfg
+    end
+
+    while true and RunningEnvirontments do
+        if Configuration.Pet.AutoPlacePet and not Configuration.Waiting then
+            local petCfg = pickPet()
+            if petCfg then
+                local grid = GetFreeGridPos(Configuration.Pet.PlaceArea)
+                if grid then
+                    local dst = GroundAtGrid(grid)
+
+                    ensureNear(dst, 12)
+                    CharacterRE:FireServer("Focus", petCfg.Name)
+                    task.wait(0.45)
+
+                    local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name } }
+                    print("Try place:", petCfg and petCfg.Name, "DST:", dst)
+                    CharacterRE:FireServer(unpack(args))
+
+                    task.wait(0.2)
+                    CharacterRE:FireServer("Focus")
+
+                    if not waitPetPlaced(petCfg.Name, 3) then
+                        warn("[AutoPlacePet] place not confirmed (no model/OwnedPets map).")
+                    end
+                end
+            end
+        end
+        task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
+    end
+end)
+-- ===== /Auto Place Pet =====
+
     
 
     -- ===== /Auto Place Pet =====
