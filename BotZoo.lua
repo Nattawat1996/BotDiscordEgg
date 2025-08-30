@@ -112,7 +112,45 @@ end
     local Mutations_InGame = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
     local PetFoods_InGame = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
     local Pets_InGame = require(InGameConfig:WaitForChild("ResPet"))["__index"]
+    -- ==== Disable 3D Rendering Helper (with fallback) ====
+    local RunService = game:GetService("RunService")
 
+    local function _toggleWhiteOverlay(show)
+        local pg = Player:FindFirstChild("PlayerGui")
+        if not pg then return end
+        local gui = pg:FindFirstChild("PerfWhite") or Instance.new("ScreenGui")
+        if not gui.Parent then
+            gui.Name = "PerfWhite"
+            gui.IgnoreGuiInset = true
+            gui.DisplayOrder = 1e9
+            gui.ResetOnSpawn = false
+            gui.Parent = pg
+            local f = Instance.new("Frame")
+            f.Name = "F"
+            f.Size = UDim2.fromScale(1,1)
+            f.BackgroundColor3 = Color3.new(1,1,1)
+            f.BackgroundTransparency = 0
+            f.Parent = gui
+        end
+        local frame = gui:FindFirstChild("F")
+        if frame then frame.BackgroundTransparency = show and 0 or 1 end
+        gui.Enabled = show
+    end
+
+    local function Perf_Set3DEnabled(enable3D)
+        -- พยายามใช้ API ตรง
+        local ok = pcall(function()
+            RunService:Set3dRenderingEnabled(enable3D)
+        end)
+        if ok then
+            -- ถ้าใช้ API ได้: ไม่ต้องจอขาว
+            _toggleWhiteOverlay(false)
+        else
+            -- Fallback: ทำจอขาวทับเมื่อปิด 3D
+            _toggleWhiteOverlay(not enable3D)
+        end
+    end
+    
     -- เก็บกริดฟาร์ม
     local Grids = {}
     for _,grid in pairs(Island:GetDescendants()) do
@@ -302,10 +340,16 @@ end
             Food_Selected = {},
             Food_Amounts  = {},
             Food_AmountPick = "",
-        
+            Egg_Types = {},          -- ชนิดไข่ที่ตั้งใจจะส่ง (สำหรับ Match_Eggs)
+            Egg_Mutations = {},      -- มิวเทชันไข่ที่ตั้งใจจะส่ง (สำหรับ Match_Eggs)
+
             -- ▼▼ NEW: ช่วงรายได้ต่อวินาที สำหรับโหมดส่งสัตว์แบบ Range
             GiftPet_Between = { Min = 0, Max = 1000000 },
         },
+        Perf = {
+            Disable3D = false, -- ON = ปิดการเรนเดอร์ 3D (เหลือเฉพาะ GUI)
+        },
+
         
         
         Event = { AutoClaim = false, AutoClaim_Delay = 3 },
@@ -597,6 +641,23 @@ end
                                             task.wait(0.75)
                                         end
                                     end
+                                end
+                            elseif GiftType == "Match_Eggs" then
+                                -- ส่งเฉพาะไข่ที่ยังไม่ถูกวาง (ไม่มี DI) และผ่านตัวกรอง Type/Muta
+                                local typeOn = next(Configuration.Players.Egg_Types) ~= nil
+                                local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
+
+                                for _, Egg in pairs(OwnedEggData:GetChildren()) do
+                                    if Egg and not Egg:FindFirstChild("DI") then
+                                        local t = Egg:GetAttribute("T") or "BasicEgg"
+                                        local m = Egg:GetAttribute("M") or "None"
+                                        local okT = (not typeOn) or Configuration.Players.Egg_Types[t]
+                                        local okM = (not mutOn)  or Configuration.Players.Egg_Mutations[m]
+                                        if okT and okM then
+                                            CharacterRE:FireServer("Focus", Egg.Name) task.wait(0.75)
+                                            GiftRE:FireServer(GiftPlayer)            task.wait(0.75)
+                                        end
+                                    end
                                 end                            
                             elseif GiftType == "All_Eggs" then
                                 for _,Egg in pairs(OwnedEggData:GetChildren()) do
@@ -615,7 +676,7 @@ end
         })
         Tabs.Players:AddSection("Settings")
         local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
-        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs","Match_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
                 -- ▼▼ NEW: ช่องกรอก Min/Max สำหรับ “Range_Pets”
         Tabs.Players:AddInput("GiftPet_MinIncome", {
             Title = "Min income/s (for Range_Pets)",
@@ -685,6 +746,27 @@ end
                 end
             end
         })
+                -- เลือกชนิดไข่/มิวเทชันที่จะส่ง (ใช้เมื่อ Gift Type = Match_Eggs)
+                Tabs.Players:AddDropdown("Gift Egg Types", {
+                    Title = "Egg Types to Gift (Match_Eggs)",
+                    Values = Eggs_InGame,
+                    Multi = true,
+                    Default = {},
+                    Callback = function(v)
+                        Configuration.Players.Egg_Types = v -- map boolean
+                    end
+                })
+        
+                Tabs.Players:AddDropdown("Gift Egg Mutations", {
+                    Title = "Egg Mutations to Gift (Match_Eggs)",
+                    Values = Mutations_InGame,
+                    Multi = true,
+                    Default = {},
+                    Callback = function(v)
+                        Configuration.Players.Egg_Mutations = v -- map boolean
+                    end
+                })
+        
 
         Tabs.Players:AddDropdown("Pet Type",{ Title = "Select Pet Type", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Type = v end })
         Tabs.Players:AddDropdown("Pet Mutations",{ Title = "Select Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Mutations = v end })
@@ -696,6 +778,15 @@ end
             ServerReplicatedDict:SetAttribute("AFK_THRESHOLD",(v == false and 1080 or v == true and 99999999999))
             Configuration.AntiAFK = v
         end })
+        Tabs.Settings:AddToggle("Disable3DOnly", {
+            Title = "Disable 3D Rendering (GUI only)",
+            Default = false,
+            Callback = function(v)
+                Configuration.Perf.Disable3D = v
+                Perf_Set3DEnabled(not v) -- v=true = ปิด 3D ⇒ ส่ง enable3D=false
+            end
+        })
+    
     end
 
     SaveManager:SetLibrary(Fluent)
@@ -709,7 +800,8 @@ end
 
     Window:SelectTab(1)
     Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
-
+    -- apply initial 3D state
+    Perf_Set3DEnabled(not (Configuration.Perf.Disable3D == true))
     -- ===== Anti AFK
     task.defer(function()
         local VirtualUser = game:GetService("VirtualUser")
@@ -1117,6 +1209,8 @@ end
         for _,connection in pairs(EnvirontmentConnections) do
             if connection then pcall(function() connection:Disconnect() end) end
         end
+         -- restore 3D rendering on exit
+         Perf_Set3DEnabled(true)
     end)
 
     SaveManager:LoadAutoloadConfig()
