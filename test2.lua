@@ -1106,65 +1106,79 @@ end
         end
     end)
 
-    -- ===== Auto Collect Pet (ตามโหมดที่เลือก)
-    task.defer(function()
-        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE",30)
-    
-        local function passArea(uid)
-            local want = Configuration.Pet.CollectPet_Area
-            if want == "Any" then return true end
-            return petArea(uid) == want
-        end
-    
-        while true and RunningEnvirontments do
-            if Configuration.Pet.CollectPet_Auto and not Configuration.Waiting and Configuration.Pet.CollectPet_Type ~= "All" then
-                local CollectType = Configuration.Pet.CollectPet_Type
-    
-                if CollectType == "Match Pet" then
-                    for UID,PetData in pairs(OwnedPets) do
-                        if PetData and not PetData.IsBig and passArea(UID)
-                           and Configuration.Pet.CollectPet_Pets[PetData.Type] then
-                            if PetData.RE then PetData.RE:FireServer("Claim") end
-                            CharacterRE:FireServer("Del",UID)
+            -- ===== Auto Collect Pet (with Area + ALL support) =====
+        task.defer(function()
+            local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE",30)
+
+            local function passArea(uid)
+                local want = Configuration.Pet.CollectPet_Area or "Any"
+                if want == "Any" then return true end
+                return petArea(uid) == want
+            end
+
+            while true and RunningEnvirontments do
+                if Configuration.Pet.CollectPet_Auto and not Configuration.Waiting then
+                    local CollectType = Configuration.Pet.CollectPet_Type or "All"
+
+                    if CollectType == "All" then
+                        for UID, PetData in pairs(OwnedPets) do
+                            if PetData and not PetData.IsBig and passArea(UID) then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end
+                                CharacterRE:FireServer("Del", UID)
+                                print("[AutoCollectPet][All] claimed & deleted:", UID, PetData.Type, PetData.Mutate)
+                            end
                         end
-                    end
-    
-                elseif CollectType == "Match Mutation" then
-                    for UID,PetData in pairs(OwnedPets) do
-                        if PetData and not PetData.IsBig and passArea(UID)
-                           and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                            if PetData.RE then PetData.RE:FireServer("Claim") end
-                            CharacterRE:FireServer("Del",UID)
-                        end
-                    end
-    
-                elseif CollectType == "Match Pet&Mutation" then
-                    for UID,PetData in pairs(OwnedPets) do
-                        if PetData and not PetData.IsBig and passArea(UID)
-                           and Configuration.Pet.CollectPet_Pets[PetData.Type]
-                           and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                            if PetData.RE then PetData.RE:FireServer("Claim") end
-                            CharacterRE:FireServer("Del",UID)
-                        end
-                    end
-    
-                elseif CollectType == "Range" then
-                    local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
-                    local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
-                    for UID,PetData in pairs(OwnedPets) do
-                        if PetData and not PetData.IsBig and passArea(UID) then
-                            local ps = tonumber(PetData.ProduceSpeed) or 0
-                            if ps >= minV and ps <= maxV then
+
+                    elseif CollectType == "Match Pet" then
+                        for UID,PetData in pairs(OwnedPets) do
+                            if PetData and not PetData.IsBig and passArea(UID)
+                            and Configuration.Pet.CollectPet_Pets[PetData.Type] then
                                 if PetData.RE then PetData.RE:FireServer("Claim") end
                                 CharacterRE:FireServer("Del",UID)
+                                print("[AutoCollectPet][Match Pet] ->", UID, PetData.Type)
+                            end
+                        end
+
+                    elseif CollectType == "Match Mutation" then
+                        for UID,PetData in pairs(OwnedPets) do
+                            if PetData and not PetData.IsBig and passArea(UID)
+                            and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end
+                                CharacterRE:FireServer("Del",UID)
+                                print("[AutoCollectPet][Match Mutation] ->", UID, PetData.Mutate)
+                            end
+                        end
+
+                    elseif CollectType == "Match Pet&Mutation" then
+                        for UID,PetData in pairs(OwnedPets) do
+                            if PetData and not PetData.IsBig and passArea(UID)
+                            and Configuration.Pet.CollectPet_Pets[PetData.Type]
+                            and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end
+                                CharacterRE:FireServer("Del",UID)
+                                print("[AutoCollectPet][Match Both] ->", UID, PetData.Type, PetData.Mutate)
+                            end
+                        end
+
+                    elseif CollectType == "Range" then
+                        local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
+                        local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
+                        for UID,PetData in pairs(OwnedPets) do
+                            if PetData and not PetData.IsBig and passArea(UID) then
+                                local ps = tonumber(PetData.ProduceSpeed) or 0
+                                if ps >= minV and ps <= maxV then
+                                    if PetData.RE then PetData.RE:FireServer("Claim") end
+                                    CharacterRE:FireServer("Del",UID)
+                                    print(string.format("[AutoCollectPet][Range %.0f-%.0f] -> %s ps=%.0f",
+                                        minV, maxV, UID, ps))
+                                end
                             end
                         end
                     end
                 end
+                task.wait(Configuration.Pet.CollectPet_Delay)
             end
-            task.wait(Configuration.Pet.CollectPet_Delay)
-        end
-    end)
+        end)
     
 
     -- ===== Auto Hatch (with area filter) =====
