@@ -995,6 +995,37 @@ local vector = vector or { create = function(x,y,z) return Vector3.new(x,y,z) en
 
 
 -- กริดว่าง: จากสัตว์/ไข่ที่วางแล้ว (ดูทั้ง workspace และ Data)
+-- ====== NEW: occupancy by proximity (works even when GridCoord is nil) ======
+local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
+    local R = radius or 5 -- ปรับได้ตามขนาดช่อง (ลอง 4~6)
+    -- 1) เช็คโมเดลสัตว์ที่วางแล้ว
+    for _, P in pairs(Pet_Folder:GetChildren()) do
+        local rp = P:FindFirstChild("RootPart") or P.PrimaryPart
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
+    end
+    -- 2) เช็คไข่ที่วางแล้ว (มีบล็อกใน BlockFolder)
+    local nearEgg = BlockFolder:FindFirstChildWhichIsA("Model")
+    -- ตรวจละเอียดกว่าด้วยการวนทั้งหมด (บางที่ชื่อไม่คงที่)
+    for _, M in ipairs(BlockFolder:GetChildren()) do
+        local rp = M:FindFirstChild("RootPart") or M.PrimaryPart
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
+    end
+    -- 3) เผื่อ Data ยังมี DI ของไข่: กันคีย์ไม่ตรงก็เทียบระยะจากตำแหน่งจริง
+    for _, E in ipairs(OwnedEggData:GetChildren()) do
+        local di = E:FindFirstChild("DI")
+        if di then
+            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
+            if (v - pos).Magnitude <= R then
+                return true
+            end
+        end
+    end
+    return false
+end
 
 local function _occupied()
     local occ = {}
@@ -1017,12 +1048,26 @@ local function pickGridList(area)
     else return AllGrids end -- Any
 end
 
+-- ====== PATCH GetFreeGridPos: allow nil GridCoord via proximity check ======
 local function GetFreeGridPos(area)
-    local occ = _occupied()
+    local occ = _occupied() -- เดิม: ใช้ key X,Z จาก GridCoord
     local list = pickGridList(area)
+
+    -- 1) ลองกริดที่มี GridCoord ปกติก่อน (เดิม)
     for _, g in ipairs(list) do
         if g.GridCoord and not occ[_ck(g.GridCoord)] then
-            return g.GridPos
+            -- กันเคสมีของค้างอยู่จริงๆ ด้วย proximity
+            if not IsOccupiedAtPosition(g.GridPos, 5) then
+                return g.GridPos
+            end
+        end
+    end
+    -- 2) Fallback: อนุญาตกริดที่ GridCoord == nil (เช่น "ช่องตรงกลาง")
+    for _, g in ipairs(list) do
+        if not g.GridCoord then
+            if not IsOccupiedAtPosition(g.GridPos, 5) then
+                return g.GridPos
+            end
         end
     end
     return nil
