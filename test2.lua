@@ -1202,7 +1202,7 @@ Tabs.Sell:AddButton({
                     LotteryRE:FireServer({ event = "lottery", count = Configuration.Lottery.Count })
                 end)
             end
-            task.wait(tonumber(Configuration.Lottery.Delay) or 1800)
+            task.wait(tonumber(Configuration.Lottery.Delay))
         end
     end)
     
