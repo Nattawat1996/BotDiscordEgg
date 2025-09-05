@@ -1192,19 +1192,7 @@ Tabs.Sell:AddButton({
             task.wait(Configuration.Main.Collect_Delay)
         end
     end)
-    -- ===== Auto open Lottery
-    task.defer(function()
-        local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE", 30)
-        while true and RunningEnvirontments do
-            if Configuration.Lottery.Auto and not Configuration.Waiting then
-                -- ขอเปิดตั๋ว (ให้เซิร์ฟเวอร์ตรวจสอบ)
-                pcall(function()
-                    LotteryRE:FireServer({ event = "lottery", count = Configuration.Lottery.Count })
-                end)
-            end
-            task.wait(tonumber(Configuration.Lottery.Delay))
-        end
-    end)
+    
     
 
 
@@ -1689,11 +1677,17 @@ task.defer(function()
         task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
     end
 end)
--- ===== /Auto Place Pet =====
-
-    
-
-    -- ===== /Auto Place Pet =====
+    -- ===== Auto open Lottery
+    task.defer(function()
+        local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE", 30)
+        while true and RunningEnvirontments do
+            if Configuration.Lottery.Auto and not Configuration.Waiting then
+                -- ขอเปิดตั๋ว (ให้เซิร์ฟเวอร์ตรวจสอบ)
+                    LotteryRE:FireServer({ event = "lottery", count = Configuration.Lottery.Count })
+            end
+            task.wait(Configuration.Lottery.Delay)
+        end
+    end)
 
 
     -- ===== Auto Buy Food
