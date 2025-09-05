@@ -33,6 +33,32 @@ if game.PlaceId == 105555311806207 then
        -- ========= Helpers for placing (Egg/Pet) =========
    -- ▼▼ NEW: อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
   -- อ่านค่า "เงินต่อวิ" ของสัตว์ในกระเป๋า จาก PlayerGui UI ตาม UID
+    -- === SELL HELPERS ===
+local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
+local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
+
+local function SellEgg(uid: string)
+    if not uid or uid == "" then return false, "no uid" end
+    -- ส่วนใหญ่ server ต้องโฟกัส asset ก่อน
+    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
+    local ok, err = pcall(function()
+        PetRE:FireServer("Sell", uid, true)   -- ไข่ต้องมี true ต่อท้าย
+    end)
+    CharacterRE:FireServer("Focus")
+    return ok, err
+end
+
+local function SellPet(uid: string)
+    if not uid or uid == "" then return false, "no uid" end
+    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
+    local ok, err = pcall(function()
+        PetRE:FireServer("Sell", uid)         -- สัตว์ไม่ต้องมี true
+    end)
+    CharacterRE:FireServer("Focus")
+    return ok, err
+end
+-- === /SELL HELPERS ===
+
 local function GetInventoryIncomePerSecByUID(uid: string)
     if not uid or uid == "" then return nil end
 
@@ -406,6 +432,12 @@ end
             GiftPet_Between = { Min = 0, Max = 1000000 },
             Gift_Limit = "",
         },
+        Sell = {
+            Mode = "",                    -- "All_Unplaced_Pets" | "All_Unplaced_Eggs" | "Filter_Eggs" | "Pets_Below_Income"
+            Egg_Types = {},              -- สำหรับโหมด Filter_Eggs
+            Egg_Mutations = {},          -- สำหรับโหมด Filter_Eggs
+            Pet_Income_Threshold = 0,    -- สำหรับโหมด Pets_Below_Income (ขายตัวที่ < threshold)
+        },        
         Perf = {
             Disable3D = false, -- ON = ปิดการเรนเดอร์ 3D (เหลือเฉพาะ GUI)
         },
@@ -430,6 +462,7 @@ end
         Shop = Window:AddTab({ Title = "Shop Features", Icon = "" }),
         Event = Window:AddTab({ Title = "Event Feature", Icon = "" }),
         Players = Window:AddTab({ Title = "Players Features", Icon = "" }),
+        Sell = Window:AddTab({ Title = "Sell Features", Icon = "" }),
         Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
     }
 
@@ -744,7 +777,40 @@ end
                                         end
                                     end
                                 end
-            
+                            elseif GiftType == "All_Eggs_And_Foods" then
+                                -- ส่ง "ไข่ (ที่ยังไม่วาง)" ทั้งหมดก่อน แล้วตามด้วย "อาหารทั้งหมด"
+                                if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                                local invAttrs = (InventoryData and InventoryData:GetAttributes()) or {}
+                            
+                                local LIMIT = _limit()
+                                local sent  = 0
+                                local function trySendFocus(name: string)
+                                    CharacterRE:FireServer("Focus", name) task.wait(0.75)
+                                    GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
+                                    CharacterRE:FireServer("Focus")
+                                    sent = sent + 1
+                                    return (sent >= LIMIT)
+                                end
+                            
+                                -- 1) ส่งไข่ทั้งหมดที่ "ยังไม่ถูกวาง" (ไม่มี DI) ก่อน
+                                for _, Egg in ipairs(OwnedEggData:GetChildren()) do
+                                    if Egg and not Egg:FindFirstChild("DI") then
+                                        if trySendFocus(Egg.Name) then break end
+                                    end
+                                end
+                            
+                                -- 2) ถ้ายังไม่เต็มลิมิต ให้ส่ง "อาหารทั้งหมด" ต่อ
+                                if sent < LIMIT then
+                                    for foodName, amount in pairs(invAttrs) do
+                                        if table.find(PetFoods_InGame, foodName) and (tonumber(amount) or 0) > 0 then
+                                            local canSend = math.max(0, math.min(tonumber(amount) or 0, LIMIT - sent))
+                                            for i = 1, canSend do
+                                                if trySendFocus(foodName) then break end
+                                            end
+                                            if sent >= LIMIT then break end
+                                        end
+                                    end
+                                end                            
                             elseif GiftType == "All_Foods" then
                                 if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
                                 for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
@@ -818,7 +884,7 @@ end
         })
         Tabs.Players:AddSection("Settings")
         local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
-        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Foods","Select_Foods","All_Eggs","Match_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+        Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Eggs_And_Foods","All_Foods","Select_Foods","Match_Eggs","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
                 -- ▼▼ NEW: ช่องกรอก Min/Max สำหรับ “Range_Pets”
         Tabs.Players:AddInput("Gift Count Limit", {
             Title = "จำนวนที่จะส่ง (เว้นว่าง=ทั้งหมด)",
@@ -922,7 +988,134 @@ end
         Tabs.Players:AddDropdown("Pet Type",{ Title = "Select Pet Type", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Type = v end })
         Tabs.Players:AddDropdown("Pet Mutations",{ Title = "Select Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Mutations = v end })
         table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList) Players_Dropdown:SetValues(newList) end))
+        
+        -- Sell 
+        Tabs.Sell:AddSection("Main")
 
+-- โหมดขาย
+Tabs.Sell:AddDropdown("Sell Mode", {
+    Title = "Sell Mode",
+    Values = { "All_Unplaced_Pets", "All_Unplaced_Eggs", "Filter_Eggs", "Pets_Below_Income" },
+    Multi = false,
+    Default = "",
+    Callback = function(v) Configuration.Sell.Mode = v end
+})
+
+-- ตัวกรอง "ขายไข่แบบเลือก type และ muta"
+Tabs.Sell:AddDropdown("Sell Egg Types", {
+    Title = "Egg Types (for Filter_Eggs)",
+    Values = Eggs_InGame,
+    Multi  = true,
+    Default = {},
+    Callback = function(v) Configuration.Sell.Egg_Types = v end
+})
+
+Tabs.Sell:AddDropdown("Sell Egg Mutations", {
+    Title = "Egg Mutations (for Filter_Eggs)",
+    Values = Mutations_InGame,
+    Multi  = true,
+    Default = {},
+    Callback = function(v) Configuration.Sell.Egg_Mutations = v end
+})
+
+-- ช่องกรอก threshold "รายได้ต่อวิ" (สำหรับโหมดขายสัตว์ต่ำกว่าเกณฑ์)
+Tabs.Sell:AddInput("Pet Income Threshold", {
+    Title = "รายได้ต่อวิ (ขายสัตว์ที่ \"น้อยกว่า\" ค่านี้)",
+    Default = tostring(Configuration.Sell.Pet_Income_Threshold or 0),
+    Numeric = true, Finished = true,
+    Callback = function(v)
+        Configuration.Sell.Pet_Income_Threshold = tonumber(v) or 0
+    end
+})
+
+-- ปุ่มทำงาน
+Tabs.Sell:AddButton({
+    Title = "Sell Now",
+    Description = "ขายตามโหมดและตัวกรองที่ตั้งไว้",
+    Callback = function()
+        local mode = Configuration.Sell.Mode or ""
+        if mode == "" then
+            Fluent:Notify({ Title = "Sell", Content = "กรุณาเลือก Sell Mode ก่อน", Duration = 5 })
+            return
+        end
+
+        Window:Dialog({
+            Title = "Confirm Sell",
+            Content = "แน่ใจหรือไม่ที่จะขายตามเงื่อนไขที่ตั้งไว้?",
+            Buttons = {
+                { Title = "Yes", Callback = function()
+                    local okCnt, failCnt, total = 0, 0, 0
+
+                    if mode == "All_Unplaced_Pets" then
+                        -- สัตว์ที่ "ยังไม่ถูกวาง" = มีใน Data.Pets แต่ไม่มีในตาราง OwnedPets
+                        for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+                            local uid = petCfg.Name
+                            if not OwnedPets[uid] then
+                                total += 1
+                                local ok = select(1, SellPet(uid))
+                                if ok then okCnt += 1 else failCnt += 1 end
+                                task.wait(0.15)
+                            end
+                        end
+
+                    elseif mode == "All_Unplaced_Eggs" then
+                        for _, egg in ipairs(OwnedEggData:GetChildren()) do
+                            if egg and not egg:FindFirstChild("DI") then
+                                total += 1
+                                local ok = select(1, SellEgg(egg.Name))
+                                if ok then okCnt += 1 else failCnt += 1 end
+                                task.wait(0.15)
+                            end
+                        end
+
+                    elseif mode == "Filter_Eggs" then
+                        local typeOn = next(Configuration.Sell.Egg_Types)     ~= nil
+                        local mutOn  = next(Configuration.Sell.Egg_Mutations) ~= nil
+                        for _, egg in ipairs(OwnedEggData:GetChildren()) do
+                            if egg and not egg:FindFirstChild("DI") then
+                                local t = egg:GetAttribute("T") or "BasicEgg"
+                                local m = egg:GetAttribute("M") or "None"
+                                local okT = (not typeOn) or Configuration.Sell.Egg_Types[t]
+                                local okM = (not mutOn)  or Configuration.Sell.Egg_Mutations[m]
+                                if okT and okM then
+                                    total += 1
+                                    local ok = select(1, SellEgg(egg.Name))
+                                    if ok then okCnt += 1 else failCnt += 1 end
+                                    task.wait(0.15)
+                                end
+                            end
+                        end
+
+                    elseif mode == "Pets_Below_Income" then
+                        local th = tonumber(Configuration.Sell.Pet_Income_Threshold) or 0
+                        -- ใช้ค่า "รายได้ต่อวิ" จาก UI Inventory (GetInventoryIncomePerSecByUID)
+                        for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+                            local uid = petCfg.Name
+                            if not OwnedPets[uid] then
+                                local inc = tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0
+                                -- ขายตัวที่ "น้อยกว่า" threshold
+                                if inc < th then
+                                    total += 1
+                                    local ok = select(1, SellPet(uid))
+                                    if ok then okCnt += 1 else failCnt += 1 end
+                                    task.wait(0.15)
+                                end
+                            end
+                        end
+                    end
+
+                    Fluent:Notify({
+                        Title = "Sell Summary",
+                        Content = ("รวม %d | สำเร็จ %d | ล้มเหลว %d"):format(total, okCnt, failCnt),
+                        Duration = 7
+                    })
+                end},
+                { Title = "No" }
+            }
+        })
+    end
+})
+    
         -- About/Settings
         Tabs.About:AddParagraph({ Title = "Credit", Content = "Script create by DemiGodz" })
         Tabs.Settings:AddToggle("AntiAFK",{ Title = "Anti AFK", Default = false, Callback = function(v)
@@ -995,6 +1188,53 @@ local vector = vector or { create = function(x,y,z) return Vector3.new(x,y,z) en
 
 
 -- กริดว่าง: จากสัตว์/ไข่ที่วางแล้ว (ดูทั้ง workspace และ Data)
+-- คืน BasePart ที่ใช้เป็นจุดอ้างอิงตำแหน่ง (รองรับทั้ง Model/Part)
+local function anchorOf(inst: Instance)
+    if inst:IsA("Model") then
+        return inst.PrimaryPart
+            or inst:FindFirstChild("RootPart")
+            or inst:FindFirstChildWhichIsA("BasePart")
+    elseif inst:IsA("BasePart") then
+        return inst
+    else
+        return inst:FindFirstChildWhichIsA("BasePart")
+    end
+end
+
+-- เช็คว่ามีวัตถุ (สัตว์/ไข่/บล็อค) อยู่ใกล้ตำแหน่งนี้หรือไม่
+local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
+    local R = radius or 5
+
+    -- 1) สัตว์ที่วางแล้ว
+    for _, P in ipairs(Pet_Folder:GetChildren()) do
+        local rp = anchorOf(P)
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
+    end
+
+    -- 2) บล็อค/ไข่ใน PlayerBuiltBlocks (อาจเป็น Model หรือ Part)
+    for _, child in ipairs(BlockFolder:GetChildren()) do
+        local rp = anchorOf(child)
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
+    end
+
+    -- 3) ไข่จาก Data (ใช้ DI)
+    for _, E in ipairs(OwnedEggData:GetChildren()) do
+        local di = E:FindFirstChild("DI")
+        if di then
+            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
+            if (v - pos).Magnitude <= R then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 
 local function _occupied()
     local occ = {}
@@ -1017,12 +1257,26 @@ local function pickGridList(area)
     else return AllGrids end -- Any
 end
 
+-- ====== PATCH GetFreeGridPos: allow nil GridCoord via proximity check ======
 local function GetFreeGridPos(area)
-    local occ = _occupied()
+    local occ = _occupied() -- เดิม: ใช้ key X,Z จาก GridCoord
     local list = pickGridList(area)
+
+    -- 1) ลองกริดที่มี GridCoord ปกติก่อน (เดิม)
     for _, g in ipairs(list) do
         if g.GridCoord and not occ[_ck(g.GridCoord)] then
-            return g.GridPos
+            -- กันเคสมีของค้างอยู่จริงๆ ด้วย proximity
+            if not IsOccupiedAtPosition(g.GridPos, 5) then
+                return g.GridPos
+            end
+        end
+    end
+    -- 2) Fallback: อนุญาตกริดที่ GridCoord == nil (เช่น "ช่องตรงกลาง")
+    for _, g in ipairs(list) do
+        if not g.GridCoord then
+            if not IsOccupiedAtPosition(g.GridPos, 5) then
+                return g.GridPos
+            end
         end
     end
     return nil
