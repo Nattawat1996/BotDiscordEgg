@@ -441,9 +441,11 @@ end
         Perf = {
             Disable3D = false, -- ON = ปิดการเรนเดอร์ 3D (เหลือเฉพาะ GUI)
         },
-
-        
-        
+        Lottery = {
+            Auto = false,         -- ติ๊กเปิด/ปิด
+            Delay = 1800,         -- ดีเลย์ (วินาที) ค่าเริ่มต้น = 30 นาที
+            Count = 1,            -- จำนวนตั๋วต่อครั้ง (ถ้าจำเป็น)
+        },
         Event = { AutoClaim = false, AutoClaim_Delay = 3 },
         AntiAFK = false, Waiting = false,
     }
@@ -691,6 +693,17 @@ end
         Tabs.Event:AddParagraph({ Title = "Event Information", Content = string.format("Current Event : %s",EventName) })
         Tabs.Event:AddSection("Main")
         Tabs.Event:AddToggle("Auto Claim Event Quest",{ Title = "Auto Claim", Default = false, Callback = function(v) Configuration.Event.AutoClaim = v end })
+        Tabs.Event:AddSection("Lottery")
+        Tabs.Event:AddToggle("Auto Lottery", {
+            Title = "Auto Open Ticket",
+            Default = false,
+            Callback = function(v) Configuration.Lottery.Auto = v end
+        })
+        Tabs.Event:AddSlider("Lottery Delay", {
+            Title = "Delay (sec)",
+            Default = 1800, Min = 60, Max = 7200, Rounding = 0,
+            Callback = function(v) Configuration.Lottery.Delay = v end
+        })
         Tabs.Event:AddSection("Settings")
         Tabs.Event:AddSlider("Event_AutoClaim Delay",{ Title = "Auto Claim Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Event.AutoClaim_Delay = v end })
 
@@ -1179,6 +1192,20 @@ Tabs.Sell:AddButton({
             task.wait(Configuration.Main.Collect_Delay)
         end
     end)
+    -- ===== Auto open Lottery
+    task.defer(function()
+        local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE", 30)
+        while true and RunningEnvirontments do
+            if Configuration.Lottery.Auto and not Configuration.Waiting then
+                -- ขอเปิดตั๋ว (ให้เซิร์ฟเวอร์ตรวจสอบ)
+                pcall(function()
+                    LotteryRE:FireServer({ event = "lottery", count = Configuration.Lottery.Count })
+                end)
+            end
+            task.wait(tonumber(Configuration.Lottery.Delay) or 1800)
+        end
+    end)
+    
 
 
 
