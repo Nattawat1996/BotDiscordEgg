@@ -443,7 +443,7 @@ end
         },
         Lottery = {
             Auto = false,         -- ติ๊กเปิด/ปิด
-            Delay = 60,         -- ดีเลย์ (วินาที) ค่าเริ่มต้น = 30 นาที
+            Delay = 1800,         -- ดีเลย์ (วินาที) ค่าเริ่มต้น = 30 นาที
             Count = 1,            -- จำนวนตั๋วต่อครั้ง (ถ้าจำเป็น)
         },
         Event = { AutoClaim = false, AutoClaim_Delay = 3 },
@@ -693,19 +693,39 @@ end
         Tabs.Event:AddParagraph({ Title = "Event Information", Content = string.format("Current Event : %s",EventName) })
         Tabs.Event:AddSection("Main")
         Tabs.Event:AddToggle("Auto Claim Event Quest",{ Title = "Auto Claim", Default = false, Callback = function(v) Configuration.Event.AutoClaim = v end })
-        Tabs.Event:AddSection("Lottery")
-        Tabs.Event:AddToggle("Auto Lottery", {
-            Title = "Auto Open Ticket",
-            Default = false,
-            Callback = function(v) Configuration.Lottery.Auto = v end
-        })
-        Tabs.Event:AddSlider("Lottery Delay", {
-            Title = "Delay (sec)",
-            Default = 1800, Min = 60, Max = 7200, Rounding = 0,
-            Callback = function(v) Configuration.Lottery.Delay = v end
-        })
         Tabs.Event:AddSection("Settings")
         Tabs.Event:AddSlider("Event_AutoClaim Delay",{ Title = "Auto Claim Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Event.AutoClaim_Delay = v end })
+                -- ===== Lottery (Auto Buy Ticket) =====
+        Tabs.Event:AddSection("Lottery")
+        Tabs.Event:AddToggle("Auto Lottery Ticket", {
+            Title = "Auto Lottery Ticket",
+            Default = false,
+            Callback = function(v)
+                Configuration.Event.AutoLottery = v
+            end
+        })
+        Tabs.Event:AddSlider("Lottery_Delay", {
+            Title = "Buy Ticket Delay (sec)",
+            Default = 60,  -- 30 นาที
+            Min = 60,
+            Max = 7200,
+            Rounding = 0,
+            Callback = function(v)
+                Configuration.Event.AutoLottery_Delay = v
+            end
+        })
+
+        -- task loop สำหรับซื้ออัตโนมัติ
+        task.defer(function()
+            local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE",30)
+            while true and RunningEnvirontments do
+                if Configuration.Event.AutoLottery then
+                    local args = { event = "lottery", count = 1 }
+                    LotteryRE:FireServer(args)
+                end
+                task.wait(Configuration.Event.AutoLottery_Delay or 60) -- ค่าเริ่มต้น 30 นาที
+            end
+        end)
 
         -- Players
         Tabs.Players:AddSection("Main")
@@ -1192,8 +1212,6 @@ Tabs.Sell:AddButton({
             task.wait(Configuration.Main.Collect_Delay)
         end
     end)
-    
-    
 
 
 
@@ -1677,17 +1695,11 @@ task.defer(function()
         task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
     end
 end)
-    -- ===== Auto open Lottery
-    task.defer(function()
-        local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE", 30)
-        while true and RunningEnvirontments do
-            if Configuration.Lottery.Auto and not Configuration.Waiting then
-                -- ขอเปิดตั๋ว (ให้เซิร์ฟเวอร์ตรวจสอบ)
-                    LotteryRE:FireServer({ event = "lottery", count = Configuration.Lottery.Count })
-            end
-            task.wait(Configuration.Lottery.Delay)
-        end
-    end)
+-- ===== /Auto Place Pet =====
+
+    
+
+    -- ===== /Auto Place Pet =====
 
 
     -- ===== Auto Buy Food
