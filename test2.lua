@@ -443,7 +443,7 @@ end
         },
         Lottery = {
             Auto = false,         -- ติ๊กเปิด/ปิด
-            Delay = 5,         -- ดีเลย์ (วินาที) ค่าเริ่มต้น = 30 นาที
+            Delay = 60,         -- ดีเลย์ (วินาที) ค่าเริ่มต้น = 30 นาที
             Count = 1,            -- จำนวนตั๋วต่อครั้ง (ถ้าจำเป็น)
         },
         Event = { AutoClaim = false, AutoClaim_Delay = 3 },
@@ -701,7 +701,7 @@ end
         })
         Tabs.Event:AddSlider("Lottery Delay", {
             Title = "Delay (sec)",
-            Default = 60, Min = 1, Max = 7200, Rounding = 0,
+            Default = 1800, Min = 60, Max = 7200, Rounding = 0,
             Callback = function(v) Configuration.Lottery.Delay = v end
         })
         Tabs.Event:AddSection("Settings")
@@ -1198,9 +1198,11 @@ Tabs.Sell:AddButton({
         while true and RunningEnvirontments do
             if Configuration.Lottery.Auto and not Configuration.Waiting then
                 -- ขอเปิดตั๋ว (ให้เซิร์ฟเวอร์ตรวจสอบ)
-                LotteryRE:FireServer({ event = "lottery", count = Configuration.Lottery.Count })
+                pcall(function()
+                    LotteryRE:FireServer({ event = "lottery", count = Configuration.Lottery.Count })
+                end)
             end
-            task.wait(Configuration.Lottery.Delay)
+            task.wait(tonumber(Configuration.Lottery.Delay))
         end
     end)
     
@@ -1264,9 +1266,7 @@ end
 local function _occupied()
     local occ = {}
     for _, P in pairs(OwnedPets) do
-        if P and P.GridCoord then o
-            cc[_ck(P.GridCoord)] = true 
-        end
+        if P and P.GridCoord then occ[_ck(P.GridCoord)] = true end
     end
     for _, E in ipairs(OwnedEggData:GetChildren()) do
         local di = E:FindFirstChild("DI")
