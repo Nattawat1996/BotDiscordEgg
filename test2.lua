@@ -1104,12 +1104,16 @@ Tabs.Sell:AddButton({
                     elseif mode == "Filter_Eggs" then
                         local typeOn = next(Configuration.Sell.Egg_Types)     ~= nil
                         local mutOn  = next(Configuration.Sell.Egg_Mutations) ~= nil
+                    
                         for _, egg in ipairs(OwnedEggData:GetChildren()) do
                             if egg and not egg:FindFirstChild("DI") then
                                 local t = egg:GetAttribute("T") or "BasicEgg"
                                 local m = egg:GetAttribute("M") or "None"
+                    
+                                -- ถ้าไม่เลือก mutation เลย => รับเฉพาะ m == "None"
                                 local okT = (not typeOn) or Configuration.Sell.Egg_Types[t]
-                                local okM = (not mutOn)  or Configuration.Sell.Egg_Mutations[m]
+                                local okM = mutOn and (Configuration.Sell.Egg_Mutations[m] == true) or (m == "None")
+                    
                                 if okT and okM then
                                     total += 1
                                     local ok = select(1, SellEgg(egg.Name))
@@ -1118,6 +1122,7 @@ Tabs.Sell:AddButton({
                                 end
                             end
                         end
+                    
 
                     elseif mode == "Pets_Below_Income" then
                         local th = tonumber(Configuration.Sell.Pet_Income_Threshold) or 0
@@ -1355,43 +1360,72 @@ local function waitPetPlaced(uid, timeout)
     end
     return false
 end
+
+-- helper: คืนชื่ออาหารตัวแรกที่ "เลือกไว้" และ "มีจำนวน > 0"
+local function pickFoodSelect(inv)
+    -- เรียงลำดับตาม PetFoods_InGame (หรือจะทำลิสต์ priority เองก็ได้)
+    for _, name in ipairs(PetFoods_InGame) do
+        if Configuration.Pet.AutoFeed_Foods[name] then
+            local have = tonumber(inv[name] or 0) or 0
+            if have > 0 then
+                return name
+            end
+        end
+    end
+    return nil
+end
 -- ========= /Helpers =========
 
 
-    -- ===== Auto Feed Pet
-    task.defer(function()
-        local Data_OwnedPets = Data:WaitForChild("Pets",30)
-        local PetRE = GameRemoteEvents:WaitForChild("PetRE")
-        local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
-        local FoodList = PetFoods_InGame
-        while true and RunningEnvirontments do
-            if Configuration.Pet.AutoFeed and not Configuration.Waiting and Configuration.Pet.AutoFeed_Type ~= "" then
-                if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
-                local Data_Inventory = InventoryData:GetAttributes()
-                for _,petCfg in pairs(Data_OwnedPets:GetChildren()) do
-                    local petModel = OwnedPets[petCfg.Name] or nil
-                    if not (petModel and petModel.IsBig) then continue end
-                    if petCfg and not petCfg:GetAttribute("Feed") then
-                        local Food = (Configuration.Pet.AutoFeed_Type == "BestFood" and (function()
-                            local best = ""
-                            for i,v in ipairs(FoodList) do if Data_Inventory[v] then best = v end end
-                            return best
-                        end)() or Configuration.Pet.AutoFeed_Type == "SelectFood" and (function()
-                            local best = ""
-                            for i,v in ipairs(PetFoods_InGame) do if Configuration.Pet.AutoFeed_Foods[v] and Data_Inventory[v] then best = v end end
-                            return best
-                        end)())
-                        if Food and Food ~= "" then
-                            CharacterRE:FireServer("Focus",Food) task.wait(0.5)
-                            PetRE:FireServer("Feed",petModel.UID) task.wait(0.5)
-                            CharacterRE:FireServer("Focus")
+   -- ===== Auto Feed Pet (เฉพาะ Big) =====
+task.defer(function()
+    local Data_OwnedPets = Data:WaitForChild("Pets",30)
+    local PetRE = GameRemoteEvents:WaitForChild("PetRE")
+    local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
+
+    while true and RunningEnvirontments do
+        if Configuration.Pet.AutoFeed and not Configuration.Waiting and Configuration.Pet.AutoFeed_Type ~= "" then
+            if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+            -- ดึงสแนปช็อตสต็อกปัจจุบันมาใช้ในรอบนี้
+            local Data_Inventory = InventoryData:GetAttributes()
+
+            for _, petCfg in ipairs(Data_OwnedPets:GetChildren()) do
+                local petModel = OwnedPets[petCfg.Name]
+                -- ให้อาหารเฉพาะตัวใหญ่ (ตามเงื่อนไขเดิมของคุณ)
+                if not (petModel and petModel.IsBig) then continue end
+                if petCfg and not petCfg:GetAttribute("Feed") then
+                    local Food = nil
+
+                    if Configuration.Pet.AutoFeed_Type == "BestFood" then
+                        -- เลือก “ดีที่สุดที่ยังมีของ” ตามลิสต์ PetFoods_InGame
+                        for _, name in ipairs(PetFoods_InGame) do
+                            local have = tonumber(Data_Inventory[name] or 0) or 0
+                            if have > 0 then
+                                Food = name
+                                break
+                            end
                         end
+
+                    elseif Configuration.Pet.AutoFeed_Type == "SelectFood" then
+                        -- เลือกจากชุดที่ผู้ใช้ติ๊กไว้ แต่ต้องมีจำนวนคงเหลือ > 0
+                        Food = pickFoodSelect(Data_Inventory)
+                    end
+
+                    if Food and Food ~= "" then
+                        -- โฟกัสอาหาร → ป้อน → ยกเลิกโฟกัส
+                        CharacterRE:FireServer("Focus", Food) task.wait(0.5)
+                        PetRE:FireServer("Feed", petModel.UID) task.wait(0.5)
+                        CharacterRE:FireServer("Focus")
+
+                        -- หักสต็อกในสแนปช็อตทันที เพื่อให้รอบเดียวกันสลับไปชนิดต่อไปได้
+                        Data_Inventory[Food] = math.max(0, (tonumber(Data_Inventory[Food] or 0) or 0) - 1)
                     end
                 end
             end
-            task.wait(Configuration.Pet.AutoFeed_Delay)
         end
-    end)
+        task.wait(Configuration.Pet.AutoFeed_Delay)
+    end
+end)
 
             -- ===== Auto Collect Pet (with Area + ALL support) =====
         task.defer(function()
