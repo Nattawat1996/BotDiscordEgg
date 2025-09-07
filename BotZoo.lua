@@ -441,9 +441,11 @@ end
         Perf = {
             Disable3D = false, -- ON = ปิดการเรนเดอร์ 3D (เหลือเฉพาะ GUI)
         },
-
-        
-        
+        Lottery = {
+            Auto = false,         -- ติ๊กเปิด/ปิด
+            Delay = 1800,         -- ดีเลย์ (วินาที) ค่าเริ่มต้น = 30 นาที
+            Count = 1,            -- จำนวนตั๋วต่อครั้ง (ถ้าจำเป็น)
+        },
         Event = { AutoClaim = false, AutoClaim_Delay = 3 },
         AntiAFK = false, Waiting = false,
     }
@@ -693,6 +695,37 @@ end
         Tabs.Event:AddToggle("Auto Claim Event Quest",{ Title = "Auto Claim", Default = false, Callback = function(v) Configuration.Event.AutoClaim = v end })
         Tabs.Event:AddSection("Settings")
         Tabs.Event:AddSlider("Event_AutoClaim Delay",{ Title = "Auto Claim Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Event.AutoClaim_Delay = v end })
+                -- ===== Lottery (Auto Buy Ticket) =====
+        Tabs.Event:AddSection("Lottery")
+        Tabs.Event:AddToggle("Auto Lottery Ticket", {
+            Title = "Auto Lottery Ticket",
+            Default = false,
+            Callback = function(v)
+                Configuration.Event.AutoLottery = v
+            end
+        })
+        Tabs.Event:AddSlider("Lottery_Delay", {
+            Title = "Buy Ticket Delay (sec)",
+            Default = 60,  -- 30 นาที
+            Min = 60,
+            Max = 7200,
+            Rounding = 0,
+            Callback = function(v)
+                Configuration.Event.AutoLottery_Delay = v
+            end
+        })
+
+        -- task loop สำหรับซื้ออัตโนมัติ
+        task.defer(function()
+            local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE",30)
+            while true and RunningEnvirontments do
+                if Configuration.Event.AutoLottery then
+                    local args = { event = "lottery", count = 1 }
+                    LotteryRE:FireServer(args)
+                end
+                task.wait(Configuration.Event.AutoLottery_Delay or 60) -- ค่าเริ่มต้น 30 นาที
+            end
+        end)
 
         -- Players
         Tabs.Players:AddSection("Main")
@@ -1071,12 +1104,16 @@ Tabs.Sell:AddButton({
                     elseif mode == "Filter_Eggs" then
                         local typeOn = next(Configuration.Sell.Egg_Types)     ~= nil
                         local mutOn  = next(Configuration.Sell.Egg_Mutations) ~= nil
+                    
                         for _, egg in ipairs(OwnedEggData:GetChildren()) do
                             if egg and not egg:FindFirstChild("DI") then
                                 local t = egg:GetAttribute("T") or "BasicEgg"
                                 local m = egg:GetAttribute("M") or "None"
+                    
+                                -- ถ้าไม่เลือก mutation เลย => รับเฉพาะ m == "None"
                                 local okT = (not typeOn) or Configuration.Sell.Egg_Types[t]
-                                local okM = (not mutOn)  or Configuration.Sell.Egg_Mutations[m]
+                                local okM = mutOn and (Configuration.Sell.Egg_Mutations[m] == true) or (m == "None")
+                    
                                 if okT and okM then
                                     total += 1
                                     local ok = select(1, SellEgg(egg.Name))
@@ -1085,6 +1122,7 @@ Tabs.Sell:AddButton({
                                 end
                             end
                         end
+                    
 
                     elseif mode == "Pets_Below_Income" then
                         local th = tonumber(Configuration.Sell.Pet_Income_Threshold) or 0
