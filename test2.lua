@@ -68,7 +68,7 @@ local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 }, { __index = function() return "🔹" end })  -- เผื่อ mutation อื่น ๆ
 
 -- ลำดับการแสดงผลของ mutation
-local MUTA_ORDER = { "None","Fire","Electric","Diamond","Gold","Dino" }
+local MUTA_ORDER = { "None","Fire","Electirc","Diamond","Gold","Dino" }
 local ORDER_SET = {}; for _,k in ipairs(MUTA_ORDER) do ORDER_SET[k]=true end
 
 -- นับไข่ในกระเป๋าแบบแยก Type → Mutation (เฉพาะที่ยังไม่วาง: ไม่มี DI)
