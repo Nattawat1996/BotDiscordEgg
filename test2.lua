@@ -1,6 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
--- Reorganized version: helpers grouped at top, logic unchanged
+-- Cleaned: removed duplicate vars, single reservation system, proper ordering
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -48,33 +48,29 @@ local Mutations_InGame  = require(InGameConfig:WaitForChild("ResMutate"))["__ind
 local PetFoods_InGame   = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
 local Pets_InGame       = require(InGameConfig:WaitForChild("ResPet"))["__index"]
 
---== Remotes (some also lazy-wait again in places)
+--== Remotes
 local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
 local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
-local _placingBusy = false
 
 --==============================================================
---                      HELPERS (GROUPED)
---          (No behavior change; only re-ordered)
+--                          HELPERS
 --==============================================================
- --  นับไข่ในกระเป๋าแบบแยก Type → Mutation
- -- อีโมจิที่ต้องการ
- local MUTA_EMOJI = setmetatable({
-    ["None"]    = "🥚",
-    ["Fire"]    = "🔥",
-    ["Electirc"]= "⚡",
-    ["Diamond"] = "💎",
-    ["Golden"]    = "🪙",
-    ["Dino"]    = "🦖",
-}, { __index = function() return "🔹" end })  -- เผื่อ mutation อื่น ๆ
 
--- ลำดับการแสดงผลของ mutation
+-- Emoji / order for mutation summary
+local MUTA_EMOJI = setmetatable({
+    ["None"]     = "🥚",
+    ["Fire"]     = "🔥",
+    ["Electirc"] = "⚡",
+    ["Diamond"]  = "💎",
+    ["Golden"]   = "🪙",
+    ["Dino"]     = "🦖",
+}, { __index = function() return "🔹" end })
 local MUTA_ORDER = { "None","Fire","Electirc","Diamond","Golden","Dino" }
 local ORDER_SET = {}; for _,k in ipairs(MUTA_ORDER) do ORDER_SET[k]=true end
 
--- นับไข่ในกระเป๋าแบบแยก Type → Mutation (เฉพาะที่ยังไม่วาง: ไม่มี DI)
+-- Count unplaced eggs grouped by Type→Mutation
 local function CountEggsByTypeMuta()
-    local map = {}  -- type -> muta -> count
+    local map = {}
     for _, egg in ipairs(OwnedEggData:GetChildren()) do
         if egg and not egg:FindFirstChild("DI") then
             local t = egg:GetAttribute("T") or "BasicEgg"
@@ -86,12 +82,51 @@ local function CountEggsByTypeMuta()
     return map
 end
 
--- ====== NEW: key helpers ======
-local function _key_from_coord(v) return v and (tostring(v.X)..","..tostring(v.Z)) or nil end
-local function _key_from_pos(v) return ("POS:%d,%d"):format(math.floor(v.X+0.5), math.floor(v.Z+0.5)) end
+-- Island cell name helpers
+local function isWaterName(s) return s and s:find("WaterFarm") ~= nil end
+local function isLandName(s)  return s and (s:find("Farm") ~= nil) and not isWaterName(s) end
 
--- ====== NEW: build unique grid list (dedupe + sorted) ======
+-- Key helpers
+local function _key_from_coord(v) return v and (tostring(v.X)..","..tostring(v.Z)) or nil end
+local function _key_from_pos(v)   return ("POS:%d,%d"):format(math.floor(v.X+0.5), math.floor(v.Z+0.5)) end
+
+-- Anchor finder (Model/BasePart)
+local function anchorOf(inst: Instance)
+    if inst:IsA("Model") then
+        return inst.PrimaryPart
+            or inst:FindFirstChild("RootPart")
+            or inst:FindFirstChildWhichIsA("BasePart")
+    elseif inst:IsA("BasePart") then
+        return inst
+    else
+        return inst:FindFirstChildWhichIsA("BasePart")
+    end
+end
+
+-- Proximity occupancy check
+local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
+    local R = radius or 5
+    for _, P in ipairs(Pet_Folder:GetChildren()) do
+        local rp = anchorOf(P)
+        if rp and (rp.Position - pos).Magnitude <= R then return true end
+    end
+    for _, child in ipairs(BlockFolder:GetChildren()) do
+        local rp = anchorOf(child)
+        if rp and (rp.Position - pos).Magnitude <= R then return true end
+    end
+    for _, E in ipairs(OwnedEggData:GetChildren()) do
+        local di = E:FindFirstChild("DI")
+        if di then
+            local v = Vector3.new(di:GetAttribute("X") or 0, 0, di:GetAttribute("Z") or 0)
+            if (Vector3.new(v.X,0,v.Z) - Vector3.new(pos.X,0,pos.Z)).Magnitude <= R then return true end
+        end
+    end
+    return false
+end
+
+-- Build unique grid list (dedupe + sorted) and area sets
 local GridByArea = { Any = {}, Land = {}, Water = {} }
+local LandCoordKeySet, WaterCoordKeySet = {}, {}
 do
     local seen = {}
     local function push(area, key, pos, coord)
@@ -100,6 +135,12 @@ do
             local item = { key = key, pos = pos, coord = coord, area = area }
             table.insert(GridByArea.Any, item)
             table.insert(GridByArea[area], item)
+            -- เก็บเฉพาะช่องที่มี coord สำหรับตรวจชนิดพื้นที่จาก GridCoord
+            if coord then
+                local ck = _key_from_coord(coord)
+                if area == "Land"  then LandCoordKeySet[ck]  = true end
+                if area == "Water" then WaterCoordKeySet[ck] = true end
+            end
         end
     end
 
@@ -125,21 +166,17 @@ do
     sort2D(GridByArea.Any);  sort2D(GridByArea.Land);  sort2D(GridByArea.Water)
 end
 
--- ====== NEW: world-accurate occupied map (no DI dependency) ======
+-- World-accurate occupied map
 local function _occupied_world()
     local occ = {}
-
     for _, P in ipairs(Pet_Folder:GetChildren()) do
         local rp = anchorOf(P)
         if rp then occ[_key_from_pos(rp.Position)] = true end
     end
-
     for _, B in ipairs(BlockFolder:GetChildren()) do
         local rp = anchorOf(B)
         if rp then occ[_key_from_pos(rp.Position)] = true end
     end
-
-    -- DI fallback (ถ้ามี)
     for _, E in ipairs(OwnedEggData:GetChildren()) do
         local di = E:FindFirstChild("DI")
         if di then
@@ -150,8 +187,8 @@ local function _occupied_world()
     return occ
 end
 
--- ====== NEW: transient reservation to avoid reuse in the same tick ======
-local _reserve, _placingBusy = {}, false
+-- Reservation (avoid double use before server confirms)
+local _reserve, _placingBusy = {}, false  -- << single source of truth
 local function _reservePrune()
     local now = os.clock()
     for k,exp in pairs(_reserve) do
@@ -161,16 +198,15 @@ end
 local function _reserveAdd(key, ttl) _reserve[key] = os.clock() + (ttl or 4.0) end
 local function _reserveDel(key) _reserve[key] = nil end
 
--- ====== NEW: per-area cursor so we continue from next cell ======
+-- Per-area cursor so we continue to next cell
 local NextIdx = { Any = 1, Land = 1, Water = 1 }
-
 local function _listFor(area)
     if area == "Land" then return GridByArea.Land, "Land"
     elseif area == "Water" then return GridByArea.Water, "Water"
     else return GridByArea.Any, "Any" end
 end
 
--- ====== NEW: iterator-style picker (returns pos,key,idx) ======
+-- Iterator-style next free grid (returns pos,key,idx,canonArea)
 local function GetNextFreeGrid(area)
     _reservePrune()
     local list, canonArea = _listFor(area)
@@ -184,8 +220,8 @@ local function GetNextFreeGrid(area)
         local g   = list[idx]
         local key = g.key
         if not _reserve[key] and not occ[key] and not IsOccupiedAtPosition(g.pos, 5) then
-            _reserveAdd(key, 4.0)              -- กันไว้ระหว่างที่เซิร์ฟเวอร์สร้างของจริง
-            NextIdx[canonArea] = ((idx) % #list) + 1 -- ขยับ cursor ไปช่องถัดไปทันที
+            _reserveAdd(key, 4.0)
+            NextIdx[canonArea] = ((idx) % #list) + 1
             return g.pos, key, idx, canonArea
         end
     end
@@ -221,11 +257,7 @@ end
 -- Toggle 3D rendering (with fallback)
 local function Perf_Set3DEnabled(enable3D)
     local ok = pcall(function() RunService:Set3dRenderingEnabled(enable3D) end)
-    if ok then
-        _toggleWhiteOverlay(false)
-    else
-        _toggleWhiteOverlay(not enable3D)
-    end
+    if ok then _toggleWhiteOverlay(false) else _toggleWhiteOverlay(not enable3D) end
 end
 
 -- Read “income/sec” of an inventory pet by UID from PlayerGui
@@ -289,58 +321,20 @@ local function GetCash(TXT)
     return tonumber(cash) or 0
 end
 
--- Sell helpers (keep signatures)
-local function SellEgg(uid: string)
-    if not uid or uid == "" then return false, "no uid" end
-    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
-    local ok, err = pcall(function() PetRE:FireServer("Sell", uid, true) end)
-    CharacterRE:FireServer("Focus")
-    return ok, err
-end
-local function SellPet(uid: string)
-    if not uid or uid == "" then return false, "no uid" end
-    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
-    local ok, err = pcall(function() PetRE:FireServer("Sell", uid) end)
-    CharacterRE:FireServer("Focus")
-    return ok, err
-end
-
---=========== Grid / Area helpers ===========
--- Scan grids and classify Land / Water
-local LandGrids, WaterGrids, AllGrids = {}, {}, {}
-local function isWaterName(s) return s and s:find("WaterFarm") ~= nil end
-local function isLandName(s)  return s and (s:find("Farm") ~= nil) and not isWaterName(s) end
-
-for _, grid in ipairs(Island:GetDescendants()) do
-    if grid:IsA("BasePart") then
-        local n = tostring(grid.Name or grid)
-        if isWaterName(n) then
-            table.insert(WaterGrids, { GridCoord = grid:GetAttribute("IslandCoord"), GridPos = grid.Position })
-        elseif isLandName(n) then
-            table.insert(LandGrids,  { GridCoord = grid:GetAttribute("IslandCoord"), GridPos = grid.Position })
-        end
-    end
-end
-for _,g in ipairs(LandGrids)  do table.insert(AllGrids, g) end
-for _,g in ipairs(WaterGrids) do table.insert(AllGrids, g) end
-
--- Fast-lookup for area keys
-local function _ck(v) return v and (tostring(v.X)..","..tostring(v.Z)) or nil end
-local LandKeySet, WaterKeySet = {}, {}
-for _,g in ipairs(LandGrids)  do if g.GridCoord then LandKeySet[_ck(g.GridCoord)]  = true end end
-for _,g in ipairs(WaterGrids) do if g.GridCoord then WaterKeySet[_ck(g.GridCoord)] = true end end
-
+-- Area of gridcoord
 local function areaOfCoord(v3)
     if not v3 then return "Any" end
-    local k = _ck(v3)
-    if WaterKeySet[k] then return "Water" end
-    if LandKeySet[k]  then return "Land"  end
+    local k = _key_from_coord(v3)
+    if WaterCoordKeySet[k] then return "Water" end
+    if LandCoordKeySet[k]  then return "Land"  end
     return "Any"
 end
 
 -- Determine pet/egg area
+local OwnedPets = {} -- forward
 local function petArea(uid: string)
-    local di = OwnedPetData and OwnedPetData:FindFirstChild(uid) and OwnedPetData[uid]:FindFirstChild("DI")
+    local diFolder = OwnedPetData and OwnedPetData:FindFirstChild(uid)
+    local di = diFolder and diFolder:FindFirstChild("DI")
     if not di then
         local P = OwnedPets and OwnedPets[uid]
         return P and areaOfCoord(P.GridCoord) or "Any"
@@ -355,111 +349,20 @@ local function eggArea(eggInst: Instance)
     return areaOfCoord(v)
 end
 
--- Anchor finder (Model/BasePart)
-local function anchorOf(inst: Instance)
-    if inst:IsA("Model") then
-        return inst.PrimaryPart
-            or inst:FindFirstChild("RootPart")
-            or inst:FindFirstChildWhichIsA("BasePart")
-    elseif inst:IsA("BasePart") then
-        return inst
-    else
-        return inst:FindFirstChildWhichIsA("BasePart")
-    end
+-- Sell helpers
+local function SellEgg(uid: string)
+    if not uid or uid == "" then return false, "no uid" end
+    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
+    local ok, err = pcall(function() PetRE:FireServer("Sell", uid, true) end)
+    CharacterRE:FireServer("Focus")
+    return ok, err
 end
-
--- Proximity occupancy check
-local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
-    local R = radius or 5
-    for _, P in ipairs(Pet_Folder:GetChildren()) do
-        local rp = anchorOf(P)
-        if rp and (rp.Position - pos).Magnitude <= R then return true end
-    end
-    for _, child in ipairs(BlockFolder:GetChildren()) do
-        local rp = anchorOf(child)
-        if rp and (rp.Position - pos).Magnitude <= R then return true end
-    end
-    for _, E in ipairs(OwnedEggData:GetChildren()) do
-        local di = E:FindFirstChild("DI")
-        if di then
-            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
-            if (v - pos).Magnitude <= R then return true end
-        end
-    end
-    return false
-end
-
--- Occupied key set (by X,Z)
-local function _occupied()
-    local occ = {}
-    if OwnedPets then
-        for _, P in pairs(OwnedPets) do
-            if P and P.GridCoord then occ[_ck(P.GridCoord)] = true end
-        end
-    end
-    for _, E in ipairs(OwnedEggData:GetChildren()) do
-        local di = E:FindFirstChild("DI")
-        if di then
-            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
-            occ[_ck(v)] = true
-        end
-    end
-    return occ
-end
-
-local function pickGridList(area)
-    if area == "Land" then return LandGrids
-    elseif area == "Water" then return WaterGrids
-    else return AllGrids end
-end
---=== Transient reservation to avoid reusing the same grid immediately ===
-local _reserve = {}  -- key -> expireAt (os.clock)
-local function _reservePrune()
-    local now = os.clock()
-    for k,exp in pairs(_reserve) do
-        if exp <= now then _reserve[k] = nil end
-    end
-end
-local function _reserveAdd(key, ttl)
-    _reserve[key] = os.clock() + (ttl or 4.0)  -- กันไว้ ~4 วิ พอให้ DI/Model ขึ้นจริง
-end
-local function _reserveDel(key) _reserve[key] = nil end
-
-local function _gridKeyFromItem(g)
-    if g.GridCoord then
-        return _ck(g.GridCoord)
-    else
-        -- กริดที่ไม่มี coord: ใช้ X/Z (ปัดเป็น int) เป็นคีย์ชั่วคราว
-        return ("POS:%d,%d"):format(math.floor(g.GridPos.X+0.5), math.floor(g.GridPos.Z+0.5))
-    end
-end
--- ตัวใหม่: คืนทั้งตำแหน่งและคีย์ และ "จอง" ช่องทันที
-local function GetFreeGrid(area)
-    _reservePrune()
-    local occ  = _occupied()
-    local list = pickGridList(area)
-
-    -- รอบ 1: ช่องที่มี GridCoord
-    for _, g in ipairs(list) do
-        if g.GridCoord and not occ[_ck(g.GridCoord)] then
-            local key = _gridKeyFromItem(g)
-            if not _reserve[key] and not IsOccupiedAtPosition(g.GridPos, 5) then
-                _reserveAdd(key, 4.0)
-                return g.GridPos, key
-            end
-        end
-    end
-    -- รอบ 2: ช่องที่ไม่มี GridCoord
-    for _, g in ipairs(list) do
-        if not g.GridCoord then
-            local key = _gridKeyFromItem(g)
-            if not _reserve[key] and not IsOccupiedAtPosition(g.GridPos, 5) then
-                _reserveAdd(key, 4.0)
-                return g.GridPos, key
-            end
-        end
-    end
-    return nil, nil
+local function SellPet(uid: string)
+    if not uid or uid == "" then return false, "no uid" end
+    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
+    local ok, err = pcall(function() PetRE:FireServer("Sell", uid) end)
+    CharacterRE:FireServer("Focus")
+    return ok, err
 end
 
 -- Snap to surface (raycast) for place DST
@@ -528,7 +431,6 @@ table.insert(EnvirontmentConnections,Players.PlayerAdded:Connect(function(plr)
 end))
 for _,plr in pairs(Players:GetPlayers()) do table.insert(Players_InGame,plr.Name) end
 
-local OwnedPets = {}
 local Egg_Belt = {}
 
 table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildRemoved:Connect(function(egg)
@@ -967,13 +869,11 @@ Tabs.Players:AddButton({
                             return (sent >= LIMIT)
                         end
 
-                        -- Eggs (unplaced) first
                         for _, Egg in ipairs(OwnedEggData:GetChildren()) do
                             if Egg and not Egg:FindFirstChild("DI") then
                                 if trySendFocus(Egg.Name) then break end
                             end
                         end
-                        -- Foods then
                         if sent < LIMIT then
                             for foodName, amount in pairs(invAttrs) do
                                 if table.find(PetFoods_InGame, foodName) and (tonumber(amount) or 0) > 0 then
@@ -1061,6 +961,7 @@ Tabs.Players:AddInput("Gift Count Limit", { Title = "จำนวนที่จ
 Tabs.Players:AddInput("GiftPet_MinIncome", { Title = "Min income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Min or 0), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Min = tonumber(v) or 0 end })
 Tabs.Players:AddInput("GiftPet_MaxIncome", { Title = "Max income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Max or 1000000), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Max = tonumber(v) or 1000000 end })
 
+Tabs.Players.AddDropdown = Tabs.Players.AddDropdown or Tabs.Players.AddDropdown -- guard (in case)
 Tabs.Players:AddDropdown("Gift Foods", {
     Title = "Foods to Gift (Select)",
     Description = "เลือกชนิดอาหารที่จะส่ง (ใช้เมื่อ Gift Type = Select_Foods)",
@@ -1197,32 +1098,28 @@ Tabs.Sell:AddButton({
         })
     end
 })
---============================== Inventoty =================
+
+--============================== Inventory =================
 Tabs.Inv:AddParagraph({
     Title   = "Eggs",
     Content = "Your Egg Collection  •  View all eggs in your inventory",
 })
-    local ResultPara = Tabs.Inv:AddParagraph({
-        Title   = "Summary",
-        Content = "กดปุ่ม Refresh เพื่อดึงข้อมูลล่าสุด…",
-    })
-
--- ฟังก์ชันเรนเดอร์ข้อความสรุปให้อ่านง่าย
+local ResultPara = Tabs.Inv:AddParagraph({
+    Title   = "Summary",
+    Content = "กดปุ่ม Refresh เพื่อดึงข้อมูลล่าสุด…",
+})
 local function renderSummary()
     local map = CountEggsByTypeMuta()
     local lines, shown = {}, {}
 
     local function lineFor(typeName, mutaCounts)
         table.insert(lines, ("\n• %s"):format(typeName))
-
-        -- แสดงตาม MUTA_ORDER ก่อน
         for _, key in ipairs(MUTA_ORDER) do
             local n = tonumber(mutaCounts[key] or 0) or 0
             if n > 0 then
                 table.insert(lines, ("    - %s %s: %d"):format(MUTA_EMOJI[key], key, n))
             end
         end
-        -- แล้วตามด้วย mutation อื่น ๆ (ถ้ามี)
         for m, n in pairs(mutaCounts) do
             if not ORDER_SET[m] and (tonumber(n) or 0) > 0 then
                 table.insert(lines, ("    - %s %s: %d"):format(MUTA_EMOJI[m], m, n))
@@ -1230,7 +1127,6 @@ local function renderSummary()
         end
     end
 
-    -- เรียงตาม Eggs_InGame ก่อน แล้วค่อยที่เหลือ
     for _, t in ipairs(Eggs_InGame) do
         if map[t] then lineFor(t, map[t]); shown[t]=true end
     end
@@ -1244,8 +1140,6 @@ local function renderSummary()
         return table.concat(lines, "\n")
     end
 end
-
--- ปุ่ม Refresh (กดแล้วจะดึงใหม่และอัพเดต Paragraph)
 Tabs.Inv:AddButton({
     Title = "Refresh",
     Description = "ดึงรายการไข่ในกระเป๋าแยกตาม Type/Mutation",
@@ -1254,11 +1148,8 @@ Tabs.Inv:AddButton({
         Fluent:Notify({ Title = "Inventory", Content = "อัพเดตรายการสำเร็จ", Duration = 4 })
     end
 })
+task.defer(function() ResultPara:SetDesc(renderSummary()) end)
 
--- โหลดครั้งแรก (optional)
-task.defer(function()
-    ResultPara:SetDesc(renderSummary())
-end)
 --============================== About / Settings =================
 Tabs.About:AddParagraph({ Title = "Credit", Content = "Script create by DemiGodz" })
 Tabs.Settings:AddToggle("AntiAFK",{ Title = "Anti AFK", Default = false, Callback = function(v)
@@ -1291,7 +1182,7 @@ Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Durat
 Perf_Set3DEnabled(not (Configuration.Perf.Disable3D == true))
 
 --==============================================================
---                    TASK LOOPS (UNCHANGED)
+--                    TASK LOOPS
 --==============================================================
 
 -- ===== Anti AFK
@@ -1506,7 +1397,6 @@ task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
     while true and RunningEnvirontments do
         if Configuration.Egg.AutoPlaceEgg and not Configuration.Waiting and not _placingBusy then
-            -- เลือกไข่ตามตัวกรองเดิม
             local chosenEgg
             local typeOn = next(Configuration.Egg.Types) ~= nil
             local mutOn  = next(Configuration.Egg.Mutations) ~= nil
@@ -1534,7 +1424,6 @@ task.defer(function()
                     CharacterRE:FireServer("Focus")
 
                     if not waitEggPlaced(chosenEgg, 3) then
-                        -- ล้มเหลว: ปลดจอง + ย้อน cursor กลับมาจุดเดิม เพื่อให้วนลองใหม่ช่องถัดไปอย่างถูกต้อง
                         _reserveDel(gkey)
                         if gidx and garea then NextIdx[garea] = gidx end
                         warn("[AutoPlaceEgg] not confirmed; release reservation.")
@@ -1547,15 +1436,12 @@ task.defer(function()
     end
 end)
 
-
-
-
 -- ===== Auto Place Pet
 task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 
     local function incomeOf(uid) return tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0 end
-    local function pickPet() -- เหมือนเดิม (คัดผู้สมัครตามโหมด All/Match/Range)
+    local function pickPet()
         local mode   = Configuration.Pet.PlacePet_Mode
         local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types)     ~= nil)
         local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
@@ -1615,9 +1501,6 @@ task.defer(function()
         task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
     end
 end)
-
-
-
 
 -- ===== Auto Buy Food
 task.defer(function()
