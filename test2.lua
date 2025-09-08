@@ -63,7 +63,7 @@ local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
     ["Fire"]    = "🔥",
     ["Electirc"]= "⚡",
     ["Diamond"] = "💎",
-    ["Gold"]    = "🪙",
+    ["Golden"]    = "🪙",
     ["Dino"]    = "🦖",
 }, { __index = function() return "🔹" end })  -- เผื่อ mutation อื่น ๆ
 
