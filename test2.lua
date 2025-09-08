@@ -51,6 +51,7 @@ local Pets_InGame       = require(InGameConfig:WaitForChild("ResPet"))["__index"
 --== Remotes (some also lazy-wait again in places)
 local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
 local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
+local _placingBusy = false
 
 --==============================================================
 --                      HELPERS (GROUPED)
@@ -304,26 +305,54 @@ local function pickGridList(area)
     elseif area == "Water" then return WaterGrids
     else return AllGrids end
 end
+--=== Transient reservation to avoid reusing the same grid immediately ===
+local _reserve = {}  -- key -> expireAt (os.clock)
+local function _reservePrune()
+    local now = os.clock()
+    for k,exp in pairs(_reserve) do
+        if exp <= now then _reserve[k] = nil end
+    end
+end
+local function _reserveAdd(key, ttl)
+    _reserve[key] = os.clock() + (ttl or 4.0)  -- กันไว้ ~4 วิ พอให้ DI/Model ขึ้นจริง
+end
+local function _reserveDel(key) _reserve[key] = nil end
 
--- Get free grid (first try keyed cells, then nil-key cells) with proximity guard
-local function GetFreeGridPos(area)
-    local occ = _occupied()
+local function _gridKeyFromItem(g)
+    if g.GridCoord then
+        return _ck(g.GridCoord)
+    else
+        -- กริดที่ไม่มี coord: ใช้ X/Z (ปัดเป็น int) เป็นคีย์ชั่วคราว
+        return ("POS:%d,%d"):format(math.floor(g.GridPos.X+0.5), math.floor(g.GridPos.Z+0.5))
+    end
+end
+-- ตัวใหม่: คืนทั้งตำแหน่งและคีย์ และ "จอง" ช่องทันที
+local function GetFreeGrid(area)
+    _reservePrune()
+    local occ  = _occupied()
     local list = pickGridList(area)
+
+    -- รอบ 1: ช่องที่มี GridCoord
     for _, g in ipairs(list) do
         if g.GridCoord and not occ[_ck(g.GridCoord)] then
-            if not IsOccupiedAtPosition(g.GridPos, 5) then
-                return g.GridPos
+            local key = _gridKeyFromItem(g)
+            if not _reserve[key] and not IsOccupiedAtPosition(g.GridPos, 5) then
+                _reserveAdd(key, 4.0)
+                return g.GridPos, key
             end
         end
     end
+    -- รอบ 2: ช่องที่ไม่มี GridCoord
     for _, g in ipairs(list) do
         if not g.GridCoord then
-            if not IsOccupiedAtPosition(g.GridPos, 5) then
-                return g.GridPos
+            local key = _gridKeyFromItem(g)
+            if not _reserve[key] and not IsOccupiedAtPosition(g.GridPos, 5) then
+                _reserveAdd(key, 4.0)
+                return g.GridPos, key
             end
         end
     end
-    return nil
+    return nil, nil
 end
 
 -- Snap to surface (raycast) for place DST
@@ -1365,150 +1394,119 @@ task.defer(function()
     end
 end)
 
--- ===== Auto Place Egg (Sequential one-by-one)
+-- ===== Auto Place Egg
 task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
     while true and RunningEnvirontments do
-        if Configuration.Egg.AutoPlaceEgg and not Configuration.Waiting then
-            -- ป้องกันงานอื่นมาชนระหว่างวาง
-            Configuration.Waiting = true
-
+        if Configuration.Egg.AutoPlaceEgg and not Configuration.Waiting and not _placingBusy then
+            local chosenEgg
             local typeOn = next(Configuration.Egg.Types) ~= nil
             local mutOn  = next(Configuration.Egg.Mutations) ~= nil
-
-            -- จำกัดจำนวนครั้งต่อรอบเพื่อกันลูปยาวเกิน (ปรับได้)
-            local steps, MAX_STEPS = 0, 12
-            while steps < MAX_STEPS do
-                -- เลือกไข่ "ชิ้นถัดไป" ที่ยังไม่วางและผ่านตัวกรอง
-                local chosenEgg = nil
-                for _, egg in ipairs(OwnedEggData:GetChildren()) do
-                    if egg and not egg:FindFirstChild("DI") then
-                        local t = egg:GetAttribute("T") or "BasicEgg"
-                        local m = egg:GetAttribute("M") or "None"
-                        local okT = (not typeOn) or Configuration.Egg.Types[t]
-                        local okM = (mutOn and Configuration.Egg.Mutations[m]) or (not mutOn and m == "None")
-                        if okT and okM then chosenEgg = egg break end
-                    end
+            for _, egg in ipairs(OwnedEggData:GetChildren()) do
+                if egg and not egg:FindFirstChild("DI") then
+                    local t = egg:GetAttribute("T") or "BasicEgg"
+                    local m = egg:GetAttribute("M") or "None"
+                    local okT = (not typeOn) or Configuration.Egg.Types[t]
+                    local okM = mutOn and Configuration.Egg.Mutations[m] or (m == "None")
+                    if okT and okM then chosenEgg = egg break end
                 end
-                if not chosenEgg then break end
-
-                -- หา “ช่องว่างถัดไป” ทุกครั้ง (วางทีละ 1)
-                local grid = GetFreeGridPos(Configuration.Egg.PlaceArea)
-                if not grid then break end
-
-                local dst = GroundAtGrid(grid)
-                ensureNear(dst, 12)
-
-                CharacterRE:FireServer("Focus", chosenEgg.Name)
-                task.wait(0.35)
-
-                local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = chosenEgg.Name } }
-                CharacterRE:FireServer(unpack(args))
-
-                task.wait(0.2)
-                CharacterRE:FireServer("Focus")
-
-                -- รอให้เกมยืนยันว่าไข่ “ถูกวางแล้ว” ก่อนเดินต่อ
-                if not waitEggPlaced(chosenEgg, 3) then
-                    -- ถ้าไม่คอนเฟิร์ม ให้หยุดรอบนี้ (กันสแปม)
-                    break
-                end
-
-                steps += 1
-                task.wait(0.1)
             end
 
-            Configuration.Waiting = false
+            if chosenEgg then
+                local grid, gkey = GetFreeGrid(Configuration.Egg.PlaceArea)
+                if grid then
+                    _placingBusy = true
+                    local dst = GroundAtGrid(grid)
+                    ensureNear(dst, 12)
+                    CharacterRE:FireServer("Focus", chosenEgg.Name)
+                    task.wait(0.45)
+
+                    local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = chosenEgg.Name } }
+                    CharacterRE:FireServer(unpack(args))
+                    task.wait(0.2)
+                    CharacterRE:FireServer("Focus")
+
+                    if not waitEggPlaced(chosenEgg, 3) then
+                        warn("[AutoPlaceEgg] place not confirmed (no DI).")
+                        if gkey then _reserveDel(gkey) end -- ปลดจองทันทีถ้าล้มเหลว
+                    end
+                    _placingBusy = false
+                end
+            end
         end
         task.wait(Configuration.Egg.AutoPlaceEgg_Delay or 1.0)
     end
 end)
 
 
--- ===== Auto Place Pet (Sequential one-by-one)
+
+-- ===== Auto Place Pet
 task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 
-    local function incomeOf(uid: string)
-        local inc = GetInventoryIncomePerSecByUID(uid)
-        return tonumber(inc) or 0
-    end
+    local function incomeOf(uid) return tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0 end
 
-    local function pickNextPet()
+    local function pickPet()
         local mode   = Configuration.Pet.PlacePet_Mode
         local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types)     ~= nil)
         local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
-
         local minV, maxV = 0, math.huge
         if mode == "Range" then
             minV = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
             maxV = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
         end
-
-        local best, bestInc = nil, -1
+        local candidates = {}
         for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
             local uid = petCfg.Name
             if not OwnedPets[uid] then
-                local pass = false
-                if mode == "All" then
-                    pass = true
-                elseif mode == "Match" then
+                local pass = (mode == "All")
+                if mode == "Match" then
                     local t = petCfg:GetAttribute("T")
                     local m = petCfg:GetAttribute("M") or "None"
                     local okT = (not typeOn) or Configuration.Pet.PlacePet_Types[t]
-                    local okM = (mutOn and Configuration.Pet.PlacePet_Mutations[m]) or (not mutOn and m == "None")
+                    local okM = mutOn and Configuration.Pet.PlacePet_Mutations[m] or (m == "None")
                     pass = (okT and okM)
                 elseif mode == "Range" then
                     local inc = incomeOf(uid)
                     pass = (inc >= minV and inc <= maxV)
                 end
-
-                if pass then
-                    local inc = incomeOf(uid)
-                    if inc > bestInc then best, bestInc = petCfg, inc end
-                end
+                if pass then table.insert(candidates, { cfg = petCfg, inc = incomeOf(uid) }) end
             end
         end
-        return best
+        if #candidates == 0 then return nil end
+        table.sort(candidates, function(a,b) return (a.inc or 0) > (b.inc or 0) end)
+        return candidates[1].cfg
     end
 
     while true and RunningEnvirontments do
-        if Configuration.Pet.AutoPlacePet and not Configuration.Waiting then
-            Configuration.Waiting = true
+        if Configuration.Pet.AutoPlacePet and not Configuration.Waiting and not _placingBusy then
+            local petCfg = pickPet()
+            if petCfg then
+                local grid, gkey = GetFreeGrid(Configuration.Pet.PlaceArea)
+                if grid then
+                    _placingBusy = true
+                    local dst = GroundAtGrid(grid)
+                    ensureNear(dst, 12)
+                    CharacterRE:FireServer("Focus", petCfg.Name)
+                    task.wait(0.45)
 
-            local steps, MAX_STEPS = 0, 12
-            while steps < MAX_STEPS do
-                local petCfg = pickNextPet()
-                if not petCfg then break end
+                    local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name } }
+                    CharacterRE:FireServer(unpack(args))
+                    task.wait(0.2)
+                    CharacterRE:FireServer("Focus")
 
-                local grid = GetFreeGridPos(Configuration.Pet.PlaceArea)
-                if not grid then break end
-
-                local dst = GroundAtGrid(grid)
-                ensureNear(dst, 12)
-
-                CharacterRE:FireServer("Focus", petCfg.Name)
-                task.wait(0.35)
-
-                local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name } }
-                CharacterRE:FireServer(unpack(args))
-
-                task.wait(0.2)
-                CharacterRE:FireServer("Focus")
-
-                if not waitPetPlaced(petCfg.Name, 3) then
-                    break
+                    if not waitPetPlaced(petCfg.Name, 3) then
+                        warn("[AutoPlacePet] place not confirmed.")
+                        if gkey then _reserveDel(gkey) end -- ปลดจองทันทีถ้าล้มเหลว
+                    end
+                    _placingBusy = false
                 end
-
-                steps += 1
-                task.wait(0.1)
             end
-
-            Configuration.Waiting = false
         end
         task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
     end
 end)
+
 
 
 -- ===== Auto Buy Food
