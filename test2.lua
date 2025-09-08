@@ -56,257 +56,20 @@ local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 --                      HELPERS (GROUPED)
 --          (No behavior change; only re-ordered)
 --==============================================================
-----------------------------------------------------------------
--- Inventory UI (Eggs): Refresh & List by Type + Mutation
-----------------------------------------------------------------
-do
-    -- === style helpers ===
-    local function mk(instance, props, parent)
-        local obj = Instance.new(instance)
-        for k, v in pairs(props or {}) do obj[k] = v end
-        if parent then obj.Parent = parent end
-        return obj
-    end
-    local function chip(parent, text)
-        local f = mk("Frame", {
-            BackgroundColor3=Color3.fromRGB(45,45,45),
-            BackgroundTransparency=0,
-            Size=UDim2.new(0, 72, 0, 26),
-            BorderSizePixel=0,
-            Name="Chip",
-        }, parent)
-        mk("UICorner", {CornerRadius=UDim.new(0,8)}, f)
-        mk("TextLabel", {
-            BackgroundTransparency=1,
-            Size=UDim2.fromScale(1,1),
-            Font=Enum.Font.GothamMedium,
-            Text=text,
-            TextScaled=true,
-            TextColor3=Color3.fromRGB(230,230,230)
-        }, f)
-        return f
-    end
-
-    -- === data: build { [Type] = { totalByMuta = { [muta] = count }, totalNormal = n } }
-    local function CountEggsByTypeMuta()
-        local map = {}        -- type -> muta -> count
-        for _, egg in ipairs(OwnedEggData:GetChildren()) do
-            -- นับเฉพาะ "ยังอยู่ในกระเป๋า" (ไม่มี DI หมายถึงยังไม่วาง)
-            if egg and not egg:FindFirstChild("DI") then
-                local t = egg:GetAttribute("T") or "BasicEgg"
-                local m = egg:GetAttribute("M") or "None"
-                map[t] = map[t] or {}
-                map[t][m] = (map[t][m] or 0) + 1
-            end
+ --  นับไข่ในกระเป๋าแบบแยก Type → Mutation
+ local function CountEggsByTypeMuta()
+    local map = {}  -- type -> muta -> count
+    for _, egg in ipairs(OwnedEggData:GetChildren()) do
+        -- เฉพาะที่ “ยังอยู่ในกระเป๋า” (ไม่มี DI)
+        if egg and not egg:FindFirstChild("DI") then
+            local t = egg:GetAttribute("T") or "BasicEgg"
+            local m = egg:GetAttribute("M") or "None"
+            map[t] = map[t] or {}
+            map[t][m] = (map[t][m] or 0) + 1
         end
-        return map
     end
-
-    -- === UI: create once
-    local _ui -- ScreenGui
-    local _list -- container for rows
-    local function EnsureInventoryGui()
-        if _ui and _ui.Parent then return end
-        local pg = Player:WaitForChild("PlayerGui")
-        _ui = mk("ScreenGui", {
-            Name="EggInventoryUI",
-            IgnoreGuiInset=true,
-            ResetOnSpawn=false,
-            ZIndexBehavior=Enum.ZIndexBehavior.Sibling,
-        }, pg)
-
-        local root = mk("Frame", {
-            Name="Root",
-            Size=UDim2.new(0, 680, 0, 420),
-            Position=UDim2.new(0.5,-340, 0.5,-210),
-            BackgroundColor3=Color3.fromRGB(24,24,24),
-            BorderSizePixel=0,
-        }, _ui)
-        mk("UICorner", {CornerRadius=UDim.new(0,14)}, root)
-        mk("UIStroke", {Thickness=1, ApplyStrokeMode=Enum.ApplyStrokeMode.Border, Color=Color3.fromRGB(55,55,55)}, root)
-
-        local header = mk("TextLabel", {
-            Size=UDim2.new(1, -140, 0, 54),
-            Position=UDim2.new(0,20,0,0),
-            BackgroundTransparency=1,
-            Font=Enum.Font.GothamBold,
-            Text="Eggs",
-            TextXAlignment=Enum.TextXAlignment.Left,
-            TextColor3=Color3.fromRGB(240,240,240),
-            TextSize=28,
-        }, root)
-
-        local refresh = mk("TextButton", {
-            Name="Refresh",
-            Size=UDim2.new(0,110,0,34),
-            Position=UDim2.new(1,-130,0,10),
-            BackgroundColor3=Color3.fromRGB(40,88,255),
-            Text="Refresh",
-            Font=Enum.Font.GothamBold, TextSize=16, TextColor3=Color3.new(1,1,1),
-            AutoButtonColor=true,
-        }, root)
-        mk("UICorner", {CornerRadius=UDim.new(0,8)}, refresh)
-
-        local sub = mk("TextLabel", {
-            Size=UDim2.new(1,-40,0,22),
-            Position=UDim2.new(0,20,0,48),
-            BackgroundTransparency=1,
-            Font=Enum.Font.Gotham,
-            Text="Your Egg Collection  •  View all eggs in your inventory",
-            TextXAlignment=Enum.TextXAlignment.Left,
-            TextColor3=Color3.fromRGB(170,170,170),
-            TextSize=14,
-        }, root)
-
-        local listHolder = mk("Frame", {
-            Name="ListHolder",
-            Size=UDim2.new(1,-40,1,-90),
-            Position=UDim2.new(0,20,0,82),
-            BackgroundTransparency=1,
-        }, root)
-
-        local scroller = mk("ScrollingFrame", {
-            Name="Scroll",
-            BackgroundTransparency=1,
-            Size=UDim2.fromScale(1,1),
-            CanvasSize=UDim2.new(0,0,0,0),
-            ScrollBarImageTransparency=0.2,
-            ScrollBarThickness=6,
-        }, listHolder)
-        local layout = mk("UIListLayout", {
-            Padding=UDim.new(0,8),
-            SortOrder=Enum.SortOrder.LayoutOrder,
-        }, scroller)
-        mk("UIPadding", {PaddingTop=UDim.new(0,2),PaddingBottom=UDim.new(0,8)}, scroller)
-
-        _list = scroller
-
-        -- close on ESC
-        game:GetService("UserInputService").InputBegan:Connect(function(i,gp)
-            if gp then return end
-            if i.KeyCode == Enum.KeyCode.Escape then
-                if _ui and _ui.Enabled then _ui.Enabled=false end
-            end
-        end)
-
-        -- hook refresh
-        refresh.MouseButton1Click:Connect(function()
-            -- แบบกดปุ่ม
-            task.spawn(function()
-                -- disable animation feel
-                refresh.AutoButtonColor = false
-                refresh.Text = "Refreshing..."
-                RefreshInventory()
-                refresh.Text = "Refresh"
-                refresh.AutoButtonColor = true
-            end)
-        end)
-    end
-
-    -- === row renderer
-    local function renderRow(typeName, mutaCounts)
-        -- row container
-        local row = mk("Frame", {
-            Name=typeName,
-            Size=UDim2.new(1,0,0,64),
-            BackgroundColor3=Color3.fromRGB(30,30,30),
-            BorderSizePixel=0,
-        }, _list)
-        mk("UICorner", {CornerRadius=UDim.new(0,10)}, row)
-
-        -- icon (placeholder block)
-        local icon = mk("Frame", {
-            Size=UDim2.new(0,50,0,50),
-            Position=UDim2.new(0,10,0.5,-25),
-            BackgroundColor3=Color3.fromRGB(46,46,46),
-            BorderSizePixel=0,
-        }, row)
-        mk("UICorner", {CornerRadius=UDim.new(0,8)}, icon)
-
-        -- name
-        mk("TextLabel", {
-            BackgroundTransparency=1,
-            Position=UDim2.new(0,70,0,8),
-            Size=UDim2.new(1,-160,0,26),
-            Font=Enum.Font.GothamBold,
-            Text=(tostring(typeName) or "Egg"),
-            TextXAlignment=Enum.TextXAlignment.Left,
-            TextColor3=Color3.fromRGB(230,230,230),
-            TextSize=22,
-        }, row)
-
-        -- chips holder (right)
-        local right = mk("Frame", {
-            BackgroundTransparency=1,
-            Size=UDim2.new(0,260,1,0),
-            Position=UDim2.new(1,-270,0,0),
-        }, row)
-        local hl = mk("UIListLayout", {
-            FillDirection=Enum.FillDirection.Horizontal,
-            VerticalAlignment=Enum.VerticalAlignment.Center,
-            HorizontalAlignment=Enum.HorizontalAlignment.Right,
-            Padding=UDim.new(0,8),
-        }, right)
-
-        -- show Normal first (muta == "None") as 🥚, then other mutations as 💎 + name
-        local normal = mutaCounts["None"] or 0
-        if normal > 0 then chip(right, "🥚 "..tostring(normal)) end
-
-        -- others
-        local keys = {}
-        for m,_ in pairs(mutaCounts) do if m ~= "None" then table.insert(keys, m) end end
-        table.sort(keys)
-        for _, m in ipairs(keys) do
-            local n = mutaCounts[m] or 0
-            chip(right, "💎 "..tostring(n).."  "..m)
-        end
-
-        -- autosize canvas
-        task.defer(function()
-            _list.CanvasSize = UDim2.new(0,0,0,_list.UIListLayout.AbsoluteContentSize.Y + 20)
-        end)
-        return row
-    end
-
-    -- === refresh (= rebuild list)
-    function RefreshInventory()
-        EnsureInventoryGui()
-        -- clear previous rows
-        for _, ch in ipairs(_list:GetChildren()) do
-            if ch:IsA("Frame") then ch:Destroy() end
-        end
-
-        local map = CountEggsByTypeMuta()
-
-        -- render by Eggs_InGame order first (ถ้ามี), จากนั้น type อื่นๆ
-        local shown = {}
-        local function renderType(t)
-            if shown[t] then return end
-            if map[t] then
-                renderRow(t, map[t]); shown[t] = true
-            end
-        end
-        -- prefer official order
-        for _, t in ipairs(Eggs_InGame) do renderType(t) end
-        -- leftover (custom / event eggs)
-        for t,_ in pairs(map) do renderType(t) end
-
-        _ui.Enabled = true
-    end
-
-    ----------------------------------------------------------------
-    --  Hook into Fluent: เพิ่มปุ่มเปิด Inventory ที่แท็บ Egg
-    ----------------------------------------------------------------
-    local invBtn = Tabs.Egg:AddButton({
-        Title = "Open Egg Inventory",
-        Description = "แสดงไข่ในกระเป๋า (แยก Type / Mutation) พร้อมปุ่ม Refresh",
-        Callback = function()
-            EnsureInventoryGui()
-            RefreshInventory()
-        end
-    })
+    return map
 end
-
 -- Small vector factory (kept for network args signature)
 local vector = { create = function(x,y,z) return Vector3.new(x,y,z) end }
 
@@ -772,6 +535,7 @@ local Tabs = {
     Event = Window:AddTab({ Title = "Event Feature" }),
     Players = Window:AddTab({ Title = "Players Features" }),
     Sell = Window:AddTab({ Title = "Sell Features" }),
+    Inv = Window:AddTab({ Title = "Inventory" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
 }
 local Options = Fluent.Options
@@ -1283,7 +1047,74 @@ Tabs.Sell:AddButton({
         })
     end
 })
+--============================== Inventoty =================
+Tabs.Inv:AddParagraph({
+    Title   = "Eggs",
+    Content = "Your Egg Collection  •  View all eggs in your inventory",
+})
+local ResultPara = Tabs.Inv:AddParagraph({
+    Title   = "Summary",
+    Content = "กดปุ่ม Refresh เพื่อดึงข้อมูลล่าสุด…",
+})
 
+-- ฟังก์ชันเรนเดอร์ข้อความสรุปให้อ่านง่าย
+local function renderSummary()
+    local map = CountEggsByTypeMuta()
+    local lines = {}
+
+    -- เรียงตามลำดับจาก Eggs_InGame ก่อน (แล้วตามด้วย type ที่นอกลิสต์)
+    local shown = {}
+
+    local function lineFor(typeName, mutaCounts)
+        -- icon + ชื่อ type
+        table.insert(lines, ("\n• %s"):format(typeName))
+
+        -- ปกติ (None) แสดงเป็น 🥚 แล้ว mutation อื่นแสดง 💎 + ชื่อ
+        local normal = tonumber(mutaCounts["None"] or 0) or 0
+        if normal > 0 then
+            table.insert(lines, ("    - 🥚 Normal: %d"):format(normal))
+        end
+
+        -- อื่นๆ (เรียงชื่อ)
+        local muts = {}
+        for m,_ in pairs(mutaCounts) do
+            if m ~= "None" then table.insert(muts, m) end
+        end
+        table.sort(muts)
+        for _, m in ipairs(muts) do
+            local n = tonumber(mutaCounts[m] or 0) or 0
+            table.insert(lines, ("    - 💎 %s: %d"):format(m, n))
+        end
+    end
+
+    for _, t in ipairs(Eggs_InGame) do   -- ตามลิสต์ในเกม
+        if map[t] then lineFor(t, map[t]); shown[t] = true end
+    end
+    for t, counts in pairs(map) do        -- type อื่นๆ ที่นอกลิสต์
+        if not shown[t] then lineFor(t, counts) end
+    end
+
+    if #lines == 0 then
+        return "ไม่มีไข่ในกระเป๋า (ที่ยังไม่ถูกวาง) ในตอนนี้"
+    else
+        return table.concat(lines, "\n")
+    end
+end
+
+-- ปุ่ม Refresh (กดแล้วจะดึงใหม่และอัพเดต Paragraph)
+Tabs.Inv:AddButton({
+    Title = "Refresh",
+    Description = "ดึงรายการไข่ในกระเป๋าแยกตาม Type/Mutation",
+    Callback = function()
+        ResultPara:SetDesc(renderSummary())
+        Fluent:Notify({ Title = "Inventory", Content = "อัพเดตรายการสำเร็จ", Duration = 4 })
+    end
+})
+
+-- โหลดครั้งแรก (optional)
+task.defer(function()
+    ResultPara:SetDesc(renderSummary())
+end)
 --============================== About / Settings =================
 Tabs.About:AddParagraph({ Title = "Credit", Content = "Script create by DemiGodz" })
 Tabs.Settings:AddToggle("AntiAFK",{ Title = "Anti AFK", Default = false, Callback = function(v)
