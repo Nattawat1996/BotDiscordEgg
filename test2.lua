@@ -57,13 +57,27 @@ local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 --          (No behavior change; only re-ordered)
 --==============================================================
  --  นับไข่ในกระเป๋าแบบแยก Type → Mutation
- local function CountEggsByTypeMuta()
+ -- อีโมจิที่ต้องการ
+ local MUTA_EMOJI = setmetatable({
+    ["None"]    = "🥚",
+    ["Fire"]    = "🔥",
+    ["Electirc"]= "⚡",
+    ["Diamond"] = "💎",
+    ["Gold"]    = "🪙",
+    ["Dino"]    = "🦖",
+}, { __index = function() return "🔹" end })  -- เผื่อ mutation อื่น ๆ
+
+-- ลำดับการแสดงผลของ mutation
+local MUTA_ORDER = { "None","Fire","Electric","Diamond","Gold","Dino" }
+local ORDER_SET = {}; for _,k in ipairs(MUTA_ORDER) do ORDER_SET[k]=true end
+
+-- นับไข่ในกระเป๋าแบบแยก Type → Mutation (เฉพาะที่ยังไม่วาง: ไม่มี DI)
+local function CountEggsByTypeMuta()
     local map = {}  -- type -> muta -> count
     for _, egg in ipairs(OwnedEggData:GetChildren()) do
-        -- เฉพาะที่ “ยังอยู่ในกระเป๋า” (ไม่มี DI)
         if egg and not egg:FindFirstChild("DI") then
             local t = egg:GetAttribute("T") or "BasicEgg"
-            local m = egg:GetAttribute("M") or "None"
+            local m = normalizeMuta(egg:GetAttribute("M") or "None")
             map[t] = map[t] or {}
             map[t][m] = (map[t][m] or 0) + 1
         end
@@ -1052,45 +1066,39 @@ Tabs.Inv:AddParagraph({
     Title   = "Eggs",
     Content = "Your Egg Collection  •  View all eggs in your inventory",
 })
-local ResultPara = Tabs.Inv:AddParagraph({
-    Title   = "Summary",
-    Content = "กดปุ่ม Refresh เพื่อดึงข้อมูลล่าสุด…",
-})
+    local ResultPara = Tabs.Inv:AddParagraph({
+        Title   = "Summary",
+        Content = "กดปุ่ม Refresh เพื่อดึงข้อมูลล่าสุด…",
+    })
 
 -- ฟังก์ชันเรนเดอร์ข้อความสรุปให้อ่านง่าย
 local function renderSummary()
     local map = CountEggsByTypeMuta()
-    local lines = {}
-
-    -- เรียงตามลำดับจาก Eggs_InGame ก่อน (แล้วตามด้วย type ที่นอกลิสต์)
-    local shown = {}
+    local lines, shown = {}, {}
 
     local function lineFor(typeName, mutaCounts)
-        -- icon + ชื่อ type
         table.insert(lines, ("\n• %s"):format(typeName))
 
-        -- ปกติ (None) แสดงเป็น 🥚 แล้ว mutation อื่นแสดง 💎 + ชื่อ
-        local normal = tonumber(mutaCounts["None"] or 0) or 0
-        if normal > 0 then
-            table.insert(lines, ("    - 🥚 Normal: %d"):format(normal))
+        -- แสดงตาม MUTA_ORDER ก่อน
+        for _, key in ipairs(MUTA_ORDER) do
+            local n = tonumber(mutaCounts[key] or 0) or 0
+            if n > 0 then
+                table.insert(lines, ("    - %s %s: %d"):format(MUTA_EMOJI[key], key, n))
+            end
         end
-
-        -- อื่นๆ (เรียงชื่อ)
-        local muts = {}
-        for m,_ in pairs(mutaCounts) do
-            if m ~= "None" then table.insert(muts, m) end
-        end
-        table.sort(muts)
-        for _, m in ipairs(muts) do
-            local n = tonumber(mutaCounts[m] or 0) or 0
-            table.insert(lines, ("    - 💎 %s: %d"):format(m, n))
+        -- แล้วตามด้วย mutation อื่น ๆ (ถ้ามี)
+        for m, n in pairs(mutaCounts) do
+            if not ORDER_SET[m] and (tonumber(n) or 0) > 0 then
+                table.insert(lines, ("    - %s %s: %d"):format(MUTA_EMOJI[m], m, n))
+            end
         end
     end
 
-    for _, t in ipairs(Eggs_InGame) do   -- ตามลิสต์ในเกม
-        if map[t] then lineFor(t, map[t]); shown[t] = true end
+    -- เรียงตาม Eggs_InGame ก่อน แล้วค่อยที่เหลือ
+    for _, t in ipairs(Eggs_InGame) do
+        if map[t] then lineFor(t, map[t]); shown[t]=true end
     end
-    for t, counts in pairs(map) do        -- type อื่นๆ ที่นอกลิสต์
+    for t, counts in pairs(map) do
         if not shown[t] then lineFor(t, counts) end
     end
 
