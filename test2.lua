@@ -85,6 +85,113 @@ local function CountEggsByTypeMuta()
     end
     return map
 end
+
+-- ====== NEW: key helpers ======
+local function _key_from_coord(v) return v and (tostring(v.X)..","..tostring(v.Z)) or nil end
+local function _key_from_pos(v) return ("POS:%d,%d"):format(math.floor(v.X+0.5), math.floor(v.Z+0.5)) end
+
+-- ====== NEW: build unique grid list (dedupe + sorted) ======
+local GridByArea = { Any = {}, Land = {}, Water = {} }
+do
+    local seen = {}
+    local function push(area, key, pos, coord)
+        if not seen[key] then
+            seen[key] = true
+            local item = { key = key, pos = pos, coord = coord, area = area }
+            table.insert(GridByArea.Any, item)
+            table.insert(GridByArea[area], item)
+        end
+    end
+
+    for _, grid in ipairs(Island:GetDescendants()) do
+        if grid:IsA("BasePart") then
+            local name = tostring(grid.Name or "")
+            local area = isWaterName(name) and "Water" or (isLandName(name) and "Land" or nil)
+            if area then
+                local coord = grid:GetAttribute("IslandCoord")
+                local pos   = grid.Position
+                local key   = coord and _key_from_coord(coord) or _key_from_pos(pos)
+                push(area, key, pos, coord)
+            end
+        end
+    end
+
+    local function sort2D(t)
+        table.sort(t, function(a,b)
+            if a.pos.Z == b.pos.Z then return a.pos.X < b.pos.X end
+            return a.pos.Z < b.pos.Z
+        end)
+    end
+    sort2D(GridByArea.Any);  sort2D(GridByArea.Land);  sort2D(GridByArea.Water)
+end
+
+-- ====== NEW: world-accurate occupied map (no DI dependency) ======
+local function _occupied_world()
+    local occ = {}
+
+    for _, P in ipairs(Pet_Folder:GetChildren()) do
+        local rp = anchorOf(P)
+        if rp then occ[_key_from_pos(rp.Position)] = true end
+    end
+
+    for _, B in ipairs(BlockFolder:GetChildren()) do
+        local rp = anchorOf(B)
+        if rp then occ[_key_from_pos(rp.Position)] = true end
+    end
+
+    -- DI fallback (ถ้ามี)
+    for _, E in ipairs(OwnedEggData:GetChildren()) do
+        local di = E:FindFirstChild("DI")
+        if di then
+            local v = Vector3.new(di:GetAttribute("X") or 0, 0, di:GetAttribute("Z") or 0)
+            occ[_key_from_pos(v)] = true
+        end
+    end
+    return occ
+end
+
+-- ====== NEW: transient reservation to avoid reuse in the same tick ======
+local _reserve, _placingBusy = {}, false
+local function _reservePrune()
+    local now = os.clock()
+    for k,exp in pairs(_reserve) do
+        if exp <= now then _reserve[k] = nil end
+    end
+end
+local function _reserveAdd(key, ttl) _reserve[key] = os.clock() + (ttl or 4.0) end
+local function _reserveDel(key) _reserve[key] = nil end
+
+-- ====== NEW: per-area cursor so we continue from next cell ======
+local NextIdx = { Any = 1, Land = 1, Water = 1 }
+
+local function _listFor(area)
+    if area == "Land" then return GridByArea.Land, "Land"
+    elseif area == "Water" then return GridByArea.Water, "Water"
+    else return GridByArea.Any, "Any" end
+end
+
+-- ====== NEW: iterator-style picker (returns pos,key,idx) ======
+local function GetNextFreeGrid(area)
+    _reservePrune()
+    local list, canonArea = _listFor(area)
+    if #list == 0 then return nil end
+
+    local occ   = _occupied_world()
+    local start = NextIdx[canonArea] or 1
+
+    for i = 0, #list - 1 do
+        local idx = ((start - 1 + i) % #list) + 1
+        local g   = list[idx]
+        local key = g.key
+        if not _reserve[key] and not occ[key] and not IsOccupiedAtPosition(g.pos, 5) then
+            _reserveAdd(key, 4.0)              -- กันไว้ระหว่างที่เซิร์ฟเวอร์สร้างของจริง
+            NextIdx[canonArea] = ((idx) % #list) + 1 -- ขยับ cursor ไปช่องถัดไปทันที
+            return g.pos, key, idx, canonArea
+        end
+    end
+    return nil
+end
+
 -- Small vector factory (kept for network args signature)
 local vector = { create = function(x,y,z) return Vector3.new(x,y,z) end }
 
@@ -1399,6 +1506,7 @@ task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
     while true and RunningEnvirontments do
         if Configuration.Egg.AutoPlaceEgg and not Configuration.Waiting and not _placingBusy then
+            -- เลือกไข่ตามตัวกรองเดิม
             local chosenEgg
             local typeOn = next(Configuration.Egg.Types) ~= nil
             local mutOn  = next(Configuration.Egg.Mutations) ~= nil
@@ -1413,22 +1521,23 @@ task.defer(function()
             end
 
             if chosenEgg then
-                local grid, gkey = GetFreeGrid(Configuration.Egg.PlaceArea)
+                local grid, gkey, gidx, garea = GetNextFreeGrid(Configuration.Egg.PlaceArea)
                 if grid then
                     _placingBusy = true
                     local dst = GroundAtGrid(grid)
                     ensureNear(dst, 12)
+
                     CharacterRE:FireServer("Focus", chosenEgg.Name)
                     task.wait(0.45)
-
-                    local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = chosenEgg.Name } }
-                    CharacterRE:FireServer(unpack(args))
+                    CharacterRE:FireServer("Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = chosenEgg.Name })
                     task.wait(0.2)
                     CharacterRE:FireServer("Focus")
 
                     if not waitEggPlaced(chosenEgg, 3) then
-                        warn("[AutoPlaceEgg] place not confirmed (no DI).")
-                        if gkey then _reserveDel(gkey) end -- ปลดจองทันทีถ้าล้มเหลว
+                        -- ล้มเหลว: ปลดจอง + ย้อน cursor กลับมาจุดเดิม เพื่อให้วนลองใหม่ช่องถัดไปอย่างถูกต้อง
+                        _reserveDel(gkey)
+                        if gidx and garea then NextIdx[garea] = gidx end
+                        warn("[AutoPlaceEgg] not confirmed; release reservation.")
                     end
                     _placingBusy = false
                 end
@@ -1440,13 +1549,13 @@ end)
 
 
 
+
 -- ===== Auto Place Pet
 task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 
     local function incomeOf(uid) return tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0 end
-
-    local function pickPet()
+    local function pickPet() -- เหมือนเดิม (คัดผู้สมัครตามโหมด All/Match/Range)
         local mode   = Configuration.Pet.PlacePet_Mode
         local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types)     ~= nil)
         local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
@@ -1482,22 +1591,22 @@ task.defer(function()
         if Configuration.Pet.AutoPlacePet and not Configuration.Waiting and not _placingBusy then
             local petCfg = pickPet()
             if petCfg then
-                local grid, gkey = GetFreeGrid(Configuration.Pet.PlaceArea)
+                local grid, gkey, gidx, garea = GetNextFreeGrid(Configuration.Pet.PlaceArea)
                 if grid then
                     _placingBusy = true
                     local dst = GroundAtGrid(grid)
                     ensureNear(dst, 12)
+
                     CharacterRE:FireServer("Focus", petCfg.Name)
                     task.wait(0.45)
-
-                    local args = { "Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name } }
-                    CharacterRE:FireServer(unpack(args))
+                    CharacterRE:FireServer("Place", { DST = vector.create(dst.X, dst.Y, dst.Z), ID = petCfg.Name })
                     task.wait(0.2)
                     CharacterRE:FireServer("Focus")
 
                     if not waitPetPlaced(petCfg.Name, 3) then
-                        warn("[AutoPlacePet] place not confirmed.")
-                        if gkey then _reserveDel(gkey) end -- ปลดจองทันทีถ้าล้มเหลว
+                        _reserveDel(gkey)
+                        if gidx and garea then NextIdx[garea] = gidx end
+                        warn("[AutoPlacePet] not confirmed; release reservation.")
                     end
                     _placingBusy = false
                 end
@@ -1506,6 +1615,7 @@ task.defer(function()
         task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
     end
 end)
+
 
 
 
