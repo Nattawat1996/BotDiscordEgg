@@ -77,7 +77,7 @@ local function CountEggsByTypeMuta()
     for _, egg in ipairs(OwnedEggData:GetChildren()) do
         if egg and not egg:FindFirstChild("DI") then
             local t = egg:GetAttribute("T") or "BasicEgg"
-            local m = normalizeMuta(egg:GetAttribute("M") or "None")
+            local m = egg:GetAttribute("M") or "None"
             map[t] = map[t] or {}
             map[t][m] = (map[t][m] or 0) + 1
         end
