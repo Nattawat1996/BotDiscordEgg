@@ -1,6 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
--- Full version with "free-slot queue" (no duplicate placements)
+-- Full version with "free-slot queue" + FPS Lock / Hide Models / Hide Effects / Hide UI (in Main tab)
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -557,7 +557,12 @@ local Configuration = {
         Egg_Types={}, Egg_Mutations={}, GiftPet_Between={Min=0,Max=1000000}, Gift_Limit="",
     },
     Sell = { Mode="", Egg_Types={}, Egg_Mutations={}, Pet_Income_Threshold=0, },
-    Perf = { Disable3D=false },
+    Perf = {
+        Disable3D=false,
+        -- NEW:
+        FPSLock=false, FPSValue=60,
+        HidePets=false, HideEggs=false, HideEffects=false, HideGameUI=false
+    },
     Lottery = { Auto=false, Delay=1800, Count=1 },
     Event = { AutoClaim=false, AutoClaim_Delay=3, AutoLottery=false, AutoLottery_Delay=60 },
     AntiAFK=false, Waiting=false,
@@ -572,6 +577,185 @@ end
 for _,v in pairs(ReplicatedStorage:GetChildren()) do
     local IsEventData = (tostring(v):match("^(.*)Event$"))
     if IsEventData then ResEvent = v EventName = IsEventData break end
+end
+
+--==============================================================
+--           NEW: FPS LOCK & HIDE (helpers + state)
+--==============================================================
+--== pick fpscap function (executor dependent)
+local function _pick_fps_setter()
+    local cands = {
+        rawget(getgenv() or {}, "setfpscap"),
+        rawget(getgenv() or {}, "set_fps_cap"),
+        rawget(_G or {},       "setfpscap"),
+        rawget(_G or {},       "set_fps_cap"),
+        (syn and syn.set_fps_cap),
+        (syn and syn.setfpscap),
+        (setfpscap),
+        (set_fps_cap),
+    }
+    for _,fn in ipairs(cands) do
+        if type(fn) == "function" then return fn end
+    end
+    return nil
+end
+local _setFPSCap = _pick_fps_setter()
+
+local function _notify(t, m)
+    pcall(function() Fluent:Notify({ Title = t, Content = m, Duration = 5 }) end)
+    print("[Perf] "..t..": "..m)
+end
+
+local function ApplyFPSLock()
+    if not Configuration.Perf.FPSLock then
+        if _setFPSCap then _setFPSCap(1000) end
+        _notify("FPS", "Unlock")
+        return
+    end
+    if not _setFPSCap then
+        _notify("FPS", "Executor ไม่รองรับ setfpscap")
+        return
+    end
+    local cap = math.max(5, math.floor(tonumber(Configuration.Perf.FPSValue) or 60))
+    _setFPSCap(cap)
+    _notify("FPS Locked", tostring(cap))
+end
+
+--== hide models/effects/ui caches
+local _partPrev = setmetatable({}, { __mode="k" })           -- BasePart -> prev LocalTransparencyModifier
+local _particlePrev = setmetatable({}, { __mode="k" })       -- ParticleEmitter -> prev Rate
+local _togglePrev   = setmetatable({}, { __mode="k" })       -- (Beam/Trail/BillboardGui/Highlight/SurfaceGui) -> prev Enabled
+local _uiPrev       = setmetatable({}, { __mode="k" })       -- ScreenGui -> prev Enabled
+local _effectsConn, _petsConn, _eggsConn, _uiConn
+
+local function _setPartVisible(part: BasePart, visible: boolean)
+    if visible then
+        local prev = _partPrev[part]
+        if prev ~= nil then
+            part.LocalTransparencyModifier = prev
+            _partPrev[part] = nil
+        else
+            part.LocalTransparencyModifier = 0
+        end
+    else
+        if _partPrev[part] == nil then
+            _partPrev[part] = part.LocalTransparencyModifier
+        end
+        part.LocalTransparencyModifier = 1
+    end
+end
+
+local function _applyModelVisible(model: Instance, visible: boolean)
+    for _,d in ipairs(model:GetDescendants()) do
+        if d:IsA("BasePart") then
+            _setPartVisible(d, visible)
+            d.CastShadow = visible and d.CastShadow or false
+        elseif d:IsA("BillboardGui") or d:IsA("SurfaceGui") then
+            if _togglePrev[d] == nil then _togglePrev[d] = d.Enabled end
+            d.Enabled = visible and (_togglePrev[d] ~= false)
+        end
+    end
+end
+
+local function ApplyHidePets(on)
+    -- existing
+    for _,m in ipairs(Pet_Folder:GetChildren()) do
+        _applyModelVisible(m, not on)
+    end
+    if _petsConn then _petsConn:Disconnect(); _petsConn = nil end
+    if on then
+        _petsConn = Pet_Folder.ChildAdded:Connect(function(m) task.wait() _applyModelVisible(m, false) end)
+        table.insert(EnvirontmentConnections, _petsConn)
+    end
+end
+
+local function _isEggModel(m: Instance)
+    -- match by UID in OwnedEggData
+    return OwnedEggData:FindFirstChild(m.Name) ~= nil
+end
+
+local function ApplyHideEggs(on)
+    for _,m in ipairs(BlockFolder:GetChildren()) do
+        if _isEggModel(m) then _applyModelVisible(m, not on) end
+    end
+    if _eggsConn then _eggsConn:Disconnect(); _eggsConn = nil end
+    if on then
+        _eggsConn = BlockFolder.ChildAdded:Connect(function(m)
+            task.wait()
+            if _isEggModel(m) then _applyModelVisible(m, false) end
+        end)
+        table.insert(EnvirontmentConnections, _eggsConn)
+    end
+end
+
+local function _applyEffectInst(inst: Instance, enable: boolean)
+    if inst:IsA("ParticleEmitter") then
+        if enable then
+            local prev = _particlePrev[inst]
+            if prev ~= nil then inst.Rate = prev; _particlePrev[inst] = nil end
+        else
+            if _particlePrev[inst] == nil then _particlePrev[inst] = inst.Rate end
+            inst.Rate = 0
+        end
+    elseif inst:IsA("Beam") or inst:IsA("Trail") or inst:IsA("Highlight") then
+        if enable then
+            if _togglePrev[inst] ~= nil then inst.Enabled = _togglePrev[inst]; _togglePrev[inst] = nil end
+        else
+            if _togglePrev[inst] == nil then _togglePrev[inst] = inst.Enabled end
+            inst.Enabled = false
+        end
+    elseif inst:IsA("Explosion") then
+        -- can't disable existing, but we can reduce visual impact by shrinking blast pressure (client-side if available)
+        pcall(function() inst.Visible = enable end)
+    end
+end
+
+local function ApplyHideEffects(on)
+    -- on=true -> disable effects
+    for _,d in ipairs(workspace:GetDescendants()) do
+        _applyEffectInst(d, not on)
+    end
+    if _effectsConn then _effectsConn:Disconnect(); _effectsConn = nil end
+    if on then
+        _effectsConn = workspace.DescendantAdded:Connect(function(d) _applyEffectInst(d, false) end)
+        table.insert(EnvirontmentConnections, _effectsConn)
+    end
+end
+
+local function ApplyHideGameUI(on)
+    local pg = Player:FindFirstChild("PlayerGui")
+    if not pg then return end
+    local fluentGui = (Fluent and Fluent.GuiObject) or (Fluent and Fluent.ScreenGui) or (Fluent and Fluent.Root) or nil
+    -- พยายามหา ScreenGui ของ Fluent/Window
+    local windowRoot = nil
+    pcall(function() windowRoot = _G.Fluent and _G.Fluent.ScreenGui end)
+    local myGui = windowRoot or (fluentGui and fluentGui:FindFirstAncestorOfClass("ScreenGui")) or pg:FindFirstChildOfClass("ScreenGui")
+
+    local whitelist = {}
+    whitelist["PerfWhite"] = true
+    if myGui then whitelist[myGui] = true end
+
+    for _,ch in ipairs(pg:GetChildren()) do
+        if ch:IsA("ScreenGui") and not whitelist[ch] then
+            if on then
+                if _uiPrev[ch] == nil then _uiPrev[ch] = ch.Enabled end
+                ch.Enabled = false
+            else
+                if _uiPrev[ch] ~= nil then ch.Enabled = _uiPrev[ch]; _uiPrev[ch] = nil end
+            end
+        end
+    end
+    if _uiConn then _uiConn:Disconnect(); _uiConn = nil end
+    if on then
+        _uiConn = pg.ChildAdded:Connect(function(ch)
+            task.wait()
+            if ch:IsA("ScreenGui") and not whitelist[ch] and Configuration.Perf.HideGameUI then
+                if _uiPrev[ch] == nil then _uiPrev[ch] = ch.Enabled end
+                ch.Enabled = false
+            end
+        end)
+        table.insert(EnvirontmentConnections, _uiConn)
+    end
 end
 
 --== Window / Tabs
@@ -602,6 +786,58 @@ Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 5, 
 Tabs.Main:AddDropdown("CollectCash Type",{ Title = "Select Type", Values = {"Delay","Between"}, Multi = false, Default = "Delay", Callback = function(v) Configuration.Main.Collect_Type = v end })
 Tabs.Main:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Min = tonumber(v) end })
 Tabs.Main:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Max = tonumber(v) end })
+
+--===================== NEW: Performance (in Main tab) =====================
+Tabs.Main:AddSection("Performance")
+Tabs.Main:AddToggle("FPS_Lock", {
+    Title = "Lock FPS",
+    Default = false,
+    Callback = function(v)
+        Configuration.Perf.FPSLock = v
+        ApplyFPSLock()
+    end
+})
+Tabs.Main:AddInput("FPS_Value", {
+    Title = "FPS Cap (ใส่ตัวเลขแล้วกด Enter)",
+    Default = tostring(Configuration.Perf.FPSValue),
+    Numeric = true, Finished = true,
+    Callback = function(v)
+        Configuration.Perf.FPSValue = tonumber(v) or 60
+        if Configuration.Perf.FPSLock then ApplyFPSLock() end
+    end
+})
+Tabs.Main:AddToggle("Hide Pets", {
+    Title = "ซ่อนโมเดลสัตว์ทั้งหมด",
+    Default = false,
+    Callback = function(v)
+        Configuration.Perf.HidePets = v
+        ApplyHidePets(v)
+    end
+})
+Tabs.Main:AddToggle("Hide Eggs", {
+    Title = "ซ่อนโมเดลไข่ (ของตนเอง)",
+    Default = false,
+    Callback = function(v)
+        Configuration.Perf.HideEggs = v
+        ApplyHideEggs(v)
+    end
+})
+Tabs.Main:AddToggle("Hide Effects", {
+    Title = "ปิด Effects (Particle/Beam/Trail/Highlight)",
+    Default = false,
+    Callback = function(v)
+        Configuration.Perf.HideEffects = v
+        ApplyHideEffects(v)
+    end
+})
+Tabs.Main:AddToggle("Hide Game UI", {
+    Title = "ซ่อน UI ของเกม (เว้นแผงนี้)",
+    Default = false,
+    Callback = function(v)
+        Configuration.Perf.HideGameUI = v
+        ApplyHideGameUI(v)
+    end
+})
 
 --============================== Pet ===============================
 Tabs.Pet:AddSection("Main")
@@ -820,7 +1056,7 @@ Tabs.Players:AddButton({
                         end
 
                     elseif GiftType == "All_Eggs_And_Foods" then
-                        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                        if not InventoryData then InventoryData = Data:FindChild("Asset") end
                         local invAttrs = (InventoryData and InventoryData:GetAttributes()) or {}
 
                         local LIMIT = _limit()
@@ -853,7 +1089,7 @@ Tabs.Players:AddButton({
                         end
 
                     elseif GiftType == "All_Foods" then
-                        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                        if not InventoryData then InventoryData = Data:FindChild("Asset") end
                         for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
                             if FoodName and table.find(PetFoods_InGame, FoodName) then
                                 for i = 1, FoodAmount do
@@ -866,7 +1102,7 @@ Tabs.Players:AddButton({
                         end
 
                     elseif GiftType == "Select_Foods" then
-                        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                        if not InventoryData then InventoryData = Data:FindChild("Asset") end
                         local inv = InventoryData and InventoryData:GetAttributes() or {}
                         local selected = Configuration.Players.Food_Selected or {}
                         local amounts  = Configuration.Players.Food_Amounts  or {}
@@ -1499,6 +1735,12 @@ end)
 --==============================================================
 Window.Root.Destroying:Once(function()
     RunningEnvirontments = false
+    -- restore visual states
+    ApplyHidePets(false)
+    ApplyHideEggs(false)
+    ApplyHideEffects(false)  -- false = enable effects
+    ApplyHideGameUI(false)
+    if _setFPSCap then _setFPSCap(1000) end
     for _,connection in pairs(EnvirontmentConnections) do
         if connection then pcall(function() connection:Disconnect() end) end
     end
