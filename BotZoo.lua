@@ -51,7 +51,8 @@ local Pets_InGame       = require(InGameConfig:WaitForChild("ResPet"))["__index"
 --== Remotes (some also lazy-wait again in places)
 local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
 local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
-
+local OwnedPets = {}
+local Egg_Belt = {}
 --==============================================================
 --                      HELPERS (GROUPED)
 --          (No behavior change; only re-ordered)
@@ -231,15 +232,18 @@ end
 local function petArea(uid: string)
     local di = OwnedPetData and OwnedPetData:FindFirstChild(uid) and OwnedPetData[uid]:FindFirstChild("DI")
     if not di then
-        local P = OwnedPets and OwnedPets[uid]
+        -- เผื่อ map ในตาราง OwnedPets มี GridCoord อยู่แล้ว
+        local P = OwnedPets[uid]
         return P and areaOfCoord(P.GridCoord) or "Any"
     end
     local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
     return areaOfCoord(v)
 end
+
 local function eggArea(eggInst: Instance)
     if not eggInst then return "Any" end
-    local di = eggInst:FindFirstChild("DI"); if not di then return "Any" end
+    local di = eggInst:FindFirstChild("DI")
+    if not di then return "Any" end
     local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
     return areaOfCoord(v)
 end
@@ -260,31 +264,42 @@ end
 -- Proximity occupancy check
 local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
     local R = radius or 5
+
+    -- 1) สัตว์ที่วางแล้ว
     for _, P in ipairs(Pet_Folder:GetChildren()) do
         local rp = anchorOf(P)
-        if rp and (rp.Position - pos).Magnitude <= R then return true end
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
     end
+
+    -- 2) บล็อค/ไข่ใน PlayerBuiltBlocks (อาจเป็น Model หรือ Part)
     for _, child in ipairs(BlockFolder:GetChildren()) do
         local rp = anchorOf(child)
-        if rp and (rp.Position - pos).Magnitude <= R then return true end
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
     end
+
+    -- 3) ไข่จาก Data (ใช้ DI)
     for _, E in ipairs(OwnedEggData:GetChildren()) do
         local di = E:FindFirstChild("DI")
         if di then
             local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
-            if (v - pos).Magnitude <= R then return true end
+            if (v - pos).Magnitude <= R then
+                return true
+            end
         end
     end
+
     return false
 end
 
 -- Occupied key set (by X,Z)
 local function _occupied()
     local occ = {}
-    if OwnedPets then
-        for _, P in pairs(OwnedPets) do
-            if P and P.GridCoord then occ[_ck(P.GridCoord)] = true end
-        end
+    for _, P in pairs(OwnedPets) do
+        if P and P.GridCoord then occ[_ck(P.GridCoord)] = true end
     end
     for _, E in ipairs(OwnedEggData:GetChildren()) do
         local di = E:FindFirstChild("DI")
@@ -297,22 +312,26 @@ local function _occupied()
 end
 
 local function pickGridList(area)
-    if area == "Land" then return LandGrids
+    if area == "Land"  then return LandGrids
     elseif area == "Water" then return WaterGrids
-    else return AllGrids end
+    else return AllGrids end -- Any
 end
 
--- Get free grid (first try keyed cells, then nil-key cells) with proximity guard
+-- ====== PATCH GetFreeGridPos: allow nil GridCoord via proximity check ======
 local function GetFreeGridPos(area)
-    local occ = _occupied()
+    local occ = _occupied() -- เดิม: ใช้ key X,Z จาก GridCoord
     local list = pickGridList(area)
+
+    -- 1) ลองกริดที่มี GridCoord ปกติก่อน (เดิม)
     for _, g in ipairs(list) do
         if g.GridCoord and not occ[_ck(g.GridCoord)] then
+            -- กันเคสมีของค้างอยู่จริงๆ ด้วย proximity
             if not IsOccupiedAtPosition(g.GridPos, 5) then
                 return g.GridPos
             end
         end
     end
+    -- 2) Fallback: อนุญาตกริดที่ GridCoord == nil (เช่น "ช่องตรงกลาง")
     for _, g in ipairs(list) do
         if not g.GridCoord then
             if not IsOccupiedAtPosition(g.GridPos, 5) then
@@ -389,8 +408,7 @@ table.insert(EnvirontmentConnections,Players.PlayerAdded:Connect(function(plr)
 end))
 for _,plr in pairs(Players:GetPlayers()) do table.insert(Players_InGame,plr.Name) end
 
-local OwnedPets = {}
-local Egg_Belt = {}
+
 
 table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildRemoved:Connect(function(egg)
     task.wait(0.1); local eggUID = tostring(egg) or "None"
@@ -1620,17 +1638,19 @@ task.defer(function()
     end
 end)
 
--- ===== Auto Place Pet
+-- ===== Auto Place Pet =====
 task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 
+    -- อ่านรายได้/วิ จาก UI; ถ้า nil ให้ถือเป็น 0
     local function incomeOf(uid: string)
         local inc = GetInventoryIncomePerSecByUID(uid)
         return tonumber(inc) or 0
     end
 
+    -- รวบรวม + เรียงลำดับ (desc) ตาม income/s แล้วคืน petCfg ตัวบนสุด
     local function pickPet()
-        local mode   = Configuration.Pet.PlacePet_Mode
+        local mode   = Configuration.Pet.PlacePet_Mode            -- "All" | "Match" | "Range"
         local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types)     ~= nil)
         local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
 
@@ -1640,31 +1660,50 @@ task.defer(function()
             maxV = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
         end
 
+        -- เก็บ candidate: { cfg = petCfg, inc = number }
         local candidates = {}
+
         for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
             local uid = petCfg.Name
+            -- “ยังไม่ถูกวาง” = ไม่มีอยู่ในตาราง OwnedPets
             if not OwnedPets[uid] then
                 local pass = false
+
                 if mode == "All" then
                     pass = true
+
                 elseif mode == "Match" then
                     local t = petCfg:GetAttribute("T")
                     local m = petCfg:GetAttribute("M") or "None"
                     local okT = (not typeOn) or Configuration.Pet.PlacePet_Types[t]
-                    local okM = mutOn and Configuration.Pet.PlacePet_Mutations[m] or (m == "None")
+                    local okM
+                    if mutOn then
+                        okM = Configuration.Pet.PlacePet_Mutations[m]
+                    else
+                        okM = (m == "None")  -- ไม่ได้เลือกมิวเทชัน => เอาเฉพาะ None
+                    end
                     pass = (okT and okM)
                 elseif mode == "Range" then
                     local inc = incomeOf(uid)
                     pass = (inc >= minV and inc <= maxV)
                 end
+
                 if pass then
                     table.insert(candidates, { cfg = petCfg, inc = incomeOf(uid) })
                 end
             end
         end
 
-        if #candidates == 0 then return nil end
-        table.sort(candidates, function(a, b) return (a.inc or 0) > (b.inc or 0) end)
+        if #candidates == 0 then
+            return nil
+        end
+
+        -- เรียงจากมาก -> น้อย
+        table.sort(candidates, function(a, b)
+            return (a.inc or 0) > (b.inc or 0)
+        end)
+
+        -- คืนตัวที่รายได้/วิ สูงสุด
         return candidates[1].cfg
     end
 
@@ -1675,6 +1714,7 @@ task.defer(function()
                 local grid = GetFreeGridPos(Configuration.Pet.PlaceArea)
                 if grid then
                     local dst = GroundAtGrid(grid)
+
                     ensureNear(dst, 12)
                     CharacterRE:FireServer("Focus", petCfg.Name)
                     task.wait(0.45)
@@ -1685,6 +1725,7 @@ task.defer(function()
 
                     task.wait(0.2)
                     CharacterRE:FireServer("Focus")
+
                     if not waitPetPlaced(petCfg.Name, 3) then
                         warn("[AutoPlacePet] place not confirmed (no model/OwnedPets map).")
                     end
@@ -1694,6 +1735,7 @@ task.defer(function()
         task.wait(Configuration.Pet.AutoPlacePet_Delay or 1.0)
     end
 end)
+-- ===== /Auto Place Pet =====
 
 -- ===== Auto Buy Food
 task.defer(function()
