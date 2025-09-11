@@ -1142,22 +1142,67 @@ Tabs.Players:AddButton({
                         end
 
                     elseif GiftType == "Match_Eggs" then
+                        -- helper: รองรับทั้ง map ({X=true}) และ array ({"X","Y"})
+                        local function isPicked(tbl, key)
+                            if type(tbl) ~= "table" then return false end
+                            if tbl[key] == true then return true end
+                            for _, v in ipairs(tbl) do
+                                if v == key then return true end
+                            end
+                            return false
+                        end
+                    
                         local typeOn = next(Configuration.Players.Egg_Types)     ~= nil
                         local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
-
-                        for _, Egg in pairs(OwnedEggData:GetChildren()) do
+                    
+                        -- จัดกลุ่มไข่ตาม mutation (ผ่านตัวกรอง type/mutation ก่อน)
+                        local buckets = {}  -- m -> { uid, uid, ... }
+                        for _, Egg in ipairs(OwnedEggData:GetChildren()) do
                             if Egg and not Egg:FindFirstChild("DI") then
                                 local t = Egg:GetAttribute("T") or "BasicEgg"
                                 local m = Egg:GetAttribute("M") or "None"
-
-                                local okT = (not typeOn) or (Configuration.Players.Egg_Types[t] == true)
-                                local okM = (mutOn and (Configuration.Players.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
-
+                    
+                                -- ถ้าไม่เลือก type ใด ๆ = ผ่านทุก type
+                                local okT = (not typeOn) or isPicked(Configuration.Players.Egg_Types, t)
+                    
+                                -- ถ้าไม่เลือก mutation เลย = รับเฉพาะ None
+                                -- ถ้าเลือกแล้ว = ต้องอยู่ในชุดที่เลือก
+                                local okM = (mutOn and isPicked(Configuration.Players.Egg_Mutations, m))
+                                         or ((not mutOn) and (m == "None"))
+                    
                                 if okT and okM then
-                                    CharacterRE:FireServer("Focus", Egg.Name) task.wait(0.75)
-                                    GiftRE:FireServer(GiftPlayer)             task.wait(0.75)
-                                    if sentOne() then break end
+                                    buckets[m] = buckets[m] or {}
+                                    table.insert(buckets[m], Egg.Name)
                                 end
+                            end
+                        end
+                    
+                        -- โควตา "ต่อ mutation" (เช่น เลือก Dino+Fire และตั้ง 1 => Dino 1 ใบ + Fire 1 ใบ)
+                        local PER_LIMIT = tonumber(Configuration.Players.Gift_Limit) or 1
+                    
+                        -- กำหนดลำดับ mutation ที่จะส่ง (ตามที่ผู้ใช้เลือก)
+                        local order = {}
+                        if mutOn then
+                            -- ถ้า Fluent ส่งมาเป็น array จะมี #tbl > 0
+                            if type(Configuration.Players.Egg_Mutations) == "table" and #Configuration.Players.Egg_Mutations > 0 then
+                                for _, m in ipairs(Configuration.Players.Egg_Mutations) do table.insert(order, m) end
+                            else
+                                for m, on in pairs(Configuration.Players.Egg_Mutations) do if on then table.insert(order, m) end end
+                            end
+                        else
+                            order = { "None" }
+                        end
+                    
+                        -- ส่งทีละ mutation ตามโควตา PER_LIMIT
+                        for _, m in ipairs(order) do
+                            local list = buckets[m] or {}
+                            local count = math.min(PER_LIMIT, #list)
+                            for i = 1, count do
+                                local uid = list[i]
+                                CharacterRE:FireServer("Focus", uid) task.wait(0.75)
+                                GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
+                                CharacterRE:FireServer("Focus")
+                                -- ไม่ใช้ LIMIT รวม เพื่อไม่ให้ “mutation อื่น” ถูกกันโควตา
                             end
                         end
                     end
@@ -1170,7 +1215,7 @@ Tabs.Players:AddButton({
 })
 Tabs.Players:AddSection("Settings")
 local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
-Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Eggs_And_Foods","All_Foods","Select_Foods","Match_Eggs","All_EggS"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Eggs_And_Foods","All_Foods","Select_Foods","Match_Eggs","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
 Tabs.Players:AddInput("Gift Count Limit", { Title = "จำนวนที่จะส่ง (เว้นว่าง=ทั้งหมด)", Default = "", Numeric = true, Finished = true, Callback = function(v) Configuration.Players.Gift_Limit = v end })
 Tabs.Players:AddInput("GiftPet_MinIncome", { Title = "Min income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Min or 0), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Min = tonumber(v) or 0 end })
 Tabs.Players:AddInput("GiftPet_MaxIncome", { Title = "Max income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Max or 1000000), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Max = tonumber(v) or 1000000 end })
