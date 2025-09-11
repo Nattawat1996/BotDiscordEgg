@@ -1589,7 +1589,7 @@ local feedFruitSelectionVisible = false
 
 
 
-Tabs.MainTab:Button({
+Tabs.EggTab:Button({
     Title = "🥚 Open Egg Selection UI",
     Desc = "Open the modern glass-style egg selection interface",
     Callback = function()
@@ -1825,7 +1825,7 @@ local function runAutoBuy()
     cleanupBeltConnections()
 end
 
-local autoBuyToggle = Tabs.MainTab:Toggle({
+local autoBuyToggle = Tabs.EggTab:Toggle({
     Title = "🥚 Auto Buy Eggs",
     Desc = "Instantly buys eggs as soon as they appear on the conveyor belt!",
     Value = false,
