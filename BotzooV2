@@ -1844,7 +1844,7 @@ local function runAutoBuy()
     cleanupBeltConnections()
 end
 
-local autoBuyToggle = Tabs.Main:Toggle({
+local autoBuyToggle = Tabs.MainTab:Toggle({
     Title = "🥚 Auto Buy Eggs",
     Desc = "Instantly buys eggs as soon as they appear on the conveyor belt!",
     Value = false,
