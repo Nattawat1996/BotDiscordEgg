@@ -1155,7 +1155,9 @@ Tabs.Players:AddButton({
                     
                                 -- ✅ ถ้าไม่เลือก Mutation เลย => รับเฉพาะ m == "None"
                                 --    ถ้าเลือกแล้ว => ต้องตรงกับที่ติ๊กไว้
-                                local okM = mutOn and (Configuration.Players.Egg_Mutations[m] == true) or (m == "None")
+                                local okM = (mutOn and (Configuration.Players.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
+                                                            
+
                     
                                 if okT and okM then
                                     CharacterRE:FireServer("Focus", Egg.Name) task.wait(0.75)
@@ -1319,7 +1321,7 @@ Tabs.Sell:AddButton({
                                 local t = egg:GetAttribute("T") or "BasicEgg"
                                 local m = egg:GetAttribute("M") or "None"
                                 local okT = (not typeOn) or Configuration.Sell.Egg_Types[t]
-                                local okM = mutOn and (Configuration.Sell.Egg_Mutations[m] == true) or (m == "None")
+                                local okM = (mutOn and (Configuration.Sell.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
 
                                 if okT and okM then
                                     total += 1
@@ -1613,7 +1615,7 @@ task.defer(function()
                     local t = egg:GetAttribute("T") or "BasicEgg"
                     local m = egg:GetAttribute("M") or "None"
                     local okT = (not typeOn) or Configuration.Egg.Types[t]
-                    local okM = mutOn and Configuration.Egg.Mutations[m] or (m == "None")
+                    local okM = (mutOn and (Configuration.Egg.Mutations[m] == true)) or ((not mutOn) and (m == "None"))
                     if okT and okM then chosenEgg = egg break end
                 end
             end
