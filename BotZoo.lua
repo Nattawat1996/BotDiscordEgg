@@ -1141,17 +1141,22 @@ Tabs.Players:AddButton({
                                 if sentOne() then break end
                             end
                         end
-
                     elseif GiftType == "Match_Eggs" then
-                        local typeOn = next(Configuration.Players.Egg_Types) ~= nil
+                        local typeOn = next(Configuration.Players.Egg_Types)     ~= nil
                         local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
-
+                    
                         for _, Egg in pairs(OwnedEggData:GetChildren()) do
                             if Egg and not Egg:FindFirstChild("DI") then
                                 local t = Egg:GetAttribute("T") or "BasicEgg"
                                 local m = Egg:GetAttribute("M") or "None"
-                                local okT = (not typeOn) or Configuration.Players.Egg_Types[t]
+                    
+                                -- ถ้าไม่เลือก Type ใดๆ = ผ่านทุก Type
+                                local okT = (not typeOn) or (Configuration.Players.Egg_Types[t] == true)
+                    
+                                -- ✅ ถ้าไม่เลือก Mutation เลย => รับเฉพาะ m == "None"
+                                --    ถ้าเลือกแล้ว => ต้องตรงกับที่ติ๊กไว้
                                 local okM = mutOn and (Configuration.Players.Egg_Mutations[m] == true) or (m == "None")
+                    
                                 if okT and okM then
                                     CharacterRE:FireServer("Focus", Egg.Name) task.wait(0.75)
                                     GiftRE:FireServer(GiftPlayer)             task.wait(0.75)
@@ -1159,7 +1164,6 @@ Tabs.Players:AddButton({
                                 end
                             end
                         end
-                    end
 
                     Configuration.Waiting = false
                 end },
