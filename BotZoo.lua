@@ -1164,7 +1164,7 @@ Tabs.Players:AddButton({
                                 end
                             end
                         end
-
+                    end
                     Configuration.Waiting = false
                 end },
                 { Title = "No", Callback = function() end }
