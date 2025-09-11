@@ -45,8 +45,7 @@ local Window = WindUI:CreateWindow({
 local Tabs = {}
 Tabs.MainSection = Window:Section({ Title = "🤖 Auto Helpers", Opened = true })
 Tabs.MainTab = Tabs.MainSection:Tab({ Title = "🏠 | Main"})
-Tabs.PlaceTab = Tabs.MainSection:Tab({ Title = "🏠 | Place Eggs"})
-Tabs.HatchTab = Tabs.MainSection:Tab({ Title = "⚡ | Hatch Eggs"})
+Tabs.EggTab = Tabs.MainSection:Tab({ Title = "🥚 | Eggs"})
 Tabs.ShopTab = Tabs.MainSection:Tab({ Title = "🛒 | Shop"})
 Tabs.PackTab = Tabs.MainSection:Tab({ Title = "🎁 | Get Packs"})
 Tabs.FruitTab = Tabs.MainSection:Tab({ Title = "🍎 | Fruit Store"})
@@ -1451,7 +1450,7 @@ local function runAutoHatch()
     end
 end
 
-local autoHatchToggle = Tabs.HatchTab:Toggle({
+local autoHatchToggle = Tabs.EggTab:Toggle({
     Title = "⚡ Auto Hatch Eggs",
     Desc = "Automatically hatches your eggs by walking to them",
     Value = false,
@@ -1475,7 +1474,7 @@ local autoHatchToggle = Tabs.HatchTab:Toggle({
 
 
 
-Tabs.HatchTab:Button({
+Tabs.EggTab:Button({
     Title = "⚡ Hatch Nearest Egg",
     Desc = "Hatch the closest egg to you",
     Callback = function()
@@ -1896,7 +1895,7 @@ local function getEggOptions()
 end
 
 -- Egg selection dropdown
-local placeEggDropdown = Tabs.PlaceTab:Dropdown({
+local placeEggDropdown = Tabs.EggTab:Dropdown({
     Title = "🥚 Pick Pet Types",
     Desc = "Choose which pets to place",
     Values = {"BasicEgg", "RareEgg", "SuperRareEgg", "EpicEgg", "LegendEgg", "PrismaticEgg", "HyperEgg", "VoidEgg", "BowserEgg", "DemonEgg", "BoneDragonEgg", "UltraEgg", "DinoEgg", "FlyEgg", "UnicornEgg", "AncientEgg"},
@@ -1909,7 +1908,7 @@ local placeEggDropdown = Tabs.PlaceTab:Dropdown({
 })
 
 -- Mutation selection dropdown for auto place
-local placeMutationDropdown = Tabs.PlaceTab:Dropdown({
+local placeMutationDropdown = Tabs.EggTab:Dropdown({
     Title = "🧬 Pick Mutations",
     Desc = "Choose which mutations to place (leave empty for all mutations)",
     Values = {"Golden", "Diamond", "Electric", "Fire", "Jurassic"},
@@ -2520,7 +2519,7 @@ local function runAutoPlace()
     cleanupPlaceConnections()
 end
 
-local autoPlaceToggle = Tabs.PlaceTab:Toggle({
+local autoPlaceToggle = Tabs.EggTab:Toggle({
     Title = "🏠 Auto Place Egg",
     Desc = "Automatically places your pets on empty farm tiles!",
     Value = false,
@@ -2669,7 +2668,7 @@ local function runAutoUnlock()
     end
 end
 
-local autoUnlockToggle = Tabs.PlaceTab:Toggle({
+local autoUnlockToggle = Tabs.EggTab:Toggle({
     Title = "🔓 Auto Unlock Tiles",
     Desc = "Automatically unlock tiles when you have enough money",
     Value = false,
@@ -2691,7 +2690,7 @@ local autoUnlockToggle = Tabs.PlaceTab:Toggle({
 
 
 
-Tabs.PlaceTab:Button({
+Tabs.EggTab:Button({
     Title = "🔓 Unlock All Affordable Now",
     Desc = "Unlock all tiles you can afford right now",
     Callback = function()
@@ -2726,7 +2725,7 @@ local deleteSpeedThreshold = 100 -- Default speed threshold
 
 -- Delete status tracking removed per user request
 
-local autoDeleteSpeedSlider = Tabs.PlaceTab:Input({
+local autoDeleteSpeedSlider = Tabs.EggTab:Input({
     Title = "Speed Threshold",
     Desc = "Delete pets with speed below this value",
     Value = "100",
@@ -2822,7 +2821,7 @@ local function runAutoDelete()
     end
 end
 
-local autoDeleteToggle = Tabs.PlaceTab:Toggle({
+local autoDeleteToggle = Tabs.EggTab:Toggle({
     Title = "Auto Delete",
     Desc = "Automatically delete slow pets (only your pets)",
     Value = false,
