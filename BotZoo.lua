@@ -1,6 +1,7 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
 -- Reorganized version: helpers grouped at top, logic unchanged
+-- + FPS Lock fix (sticky state + watchdog + safe cleanup)
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -53,6 +54,7 @@ local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
 local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 local OwnedPets = {}
 local Egg_Belt = {}
+
 --==============================================================
 --                      HELPERS (GROUPED)
 --          (No behavior change; only re-ordered)
@@ -232,7 +234,6 @@ end
 local function petArea(uid: string)
     local di = OwnedPetData and OwnedPetData:FindFirstChild(uid) and OwnedPetData[uid]:FindFirstChild("DI")
     if not di then
-        -- เผื่อ map ในตาราง OwnedPets มี GridCoord อยู่แล้ว
         local P = OwnedPets[uid]
         return P and areaOfCoord(P.GridCoord) or "Any"
     end
@@ -319,19 +320,18 @@ end
 
 -- ====== PATCH GetFreeGridPos: allow nil GridCoord via proximity check ======
 local function GetFreeGridPos(area)
-    local occ = _occupied() -- เดิม: ใช้ key X,Z จาก GridCoord
+    local occ = _occupied()
     local list = pickGridList(area)
 
-    -- 1) ลองกริดที่มี GridCoord ปกติก่อน (เดิม)
+    -- 1) ปกติ
     for _, g in ipairs(list) do
         if g.GridCoord and not occ[_ck(g.GridCoord)] then
-            -- กันเคสมีของค้างอยู่จริงๆ ด้วย proximity
             if not IsOccupiedAtPosition(g.GridPos, 5) then
                 return g.GridPos
             end
         end
     end
-    -- 2) Fallback: อนุญาตกริดที่ GridCoord == nil (เช่น "ช่องตรงกลาง")
+    -- 2) รองรับ GridCoord == nil
     for _, g in ipairs(list) do
         if not g.GridCoord then
             if not IsOccupiedAtPosition(g.GridPos, 5) then
@@ -407,8 +407,6 @@ table.insert(EnvirontmentConnections,Players.PlayerAdded:Connect(function(plr)
     Players_List_Updated:Fire(Players_InGame)
 end))
 for _,plr in pairs(Players:GetPlayers()) do table.insert(Players_InGame,plr.Name) end
-
-
 
 table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildRemoved:Connect(function(egg)
     task.wait(0.1); local eggUID = tostring(egg) or "None"
@@ -576,24 +574,32 @@ local function _pick_fps_setter()
 end
 local _setFPSCap = _pick_fps_setter()
 
+-- ==== NEW: global sticky FPS state ====
+local G = getgenv()
+G.MEOWY_FPS = G.MEOWY_FPS or { locked = false, cap = 60 }
+
 local function _notify(t, m)
     pcall(function() Fluent:Notify({ Title = t, Content = m, Duration = 5 }) end)
     print("[Perf] "..t..": "..m)
 end
 
+-- ==== PATCHED: ApplyFPSLock (sync กับ global, ไม่ปลดเองถ้า toggle ปิด) ====
 local function ApplyFPSLock()
-    if not Configuration.Perf.FPSLock then
-        if _setFPSCap then _setFPSCap(1000) end
-        _notify("FPS", "Unlock")
-        return
-    end
     if not _setFPSCap then
         _notify("FPS", "Executor ไม่รองรับ setfpscap")
         return
     end
-    local cap = math.max(5, math.floor(tonumber(Configuration.Perf.FPSValue) or 60))
-    _setFPSCap(cap)
-    _notify("FPS Locked", tostring(cap))
+    if Configuration.Perf.FPSLock then
+        local cap = math.max(5, math.floor(tonumber(Configuration.Perf.FPSValue) or 60))
+        G.MEOWY_FPS.locked = true
+        G.MEOWY_FPS.cap = cap
+        _setFPSCap(cap)
+        _notify("FPS Locked", tostring(cap))
+    else
+        G.MEOWY_FPS.locked = false
+        _setFPSCap(1000)
+        _notify("FPS", "Unlock")
+    end
 end
 
 --== hide models/effects/ui caches
@@ -633,7 +639,6 @@ local function _applyModelVisible(model: Instance, visible: boolean)
 end
 
 local function ApplyHidePets(on)
-    -- existing
     for _,m in ipairs(Pet_Folder:GetChildren()) do
         _applyModelVisible(m, not on)
     end
@@ -645,7 +650,6 @@ local function ApplyHidePets(on)
 end
 
 local function _isEggModel(m: Instance)
-    -- match by UID in OwnedEggData
     return OwnedEggData:FindFirstChild(m.Name) ~= nil
 end
 
@@ -680,13 +684,11 @@ local function _applyEffectInst(inst: Instance, enable: boolean)
             inst.Enabled = false
         end
     elseif inst:IsA("Explosion") then
-        -- can't disable existing, but we can reduce visual impact by shrinking blast pressure (client-side if available)
         pcall(function() inst.Visible = enable end)
     end
 end
 
 local function ApplyHideEffects(on)
-    -- on=true -> disable effects
     for _,d in ipairs(workspace:GetDescendants()) do
         _applyEffectInst(d, not on)
     end
@@ -701,7 +703,6 @@ local function ApplyHideGameUI(on)
     local pg = Player:FindFirstChild("PlayerGui")
     if not pg then return end
     local fluentGui = (Fluent and Fluent.GuiObject) or (Fluent and Fluent.ScreenGui) or (Fluent and Fluent.Root) or nil
-    -- พยายามหา ScreenGui ของ Fluent/Window
     local windowRoot = nil
     pcall(function() windowRoot = _G.Fluent and _G.Fluent.ScreenGui end)
     local myGui = windowRoot or (fluentGui and fluentGui:FindFirstAncestorOfClass("ScreenGui")) or pg:FindFirstChildOfClass("ScreenGui")
@@ -1081,13 +1082,11 @@ Tabs.Players:AddButton({
                             return (sent >= LIMIT)
                         end
 
-                        -- Eggs (unplaced) first
                         for _, Egg in ipairs(OwnedEggData:GetChildren()) do
                             if Egg and not Egg:FindFirstChild("DI") then
                                 if trySendFocus(Egg.Name) then break end
                             end
                         end
-                        -- Foods then
                         if sent < LIMIT then
                             for foodName, amount in pairs(invAttrs) do
                                 if table.find(PetFoods_InGame, foodName) and (tonumber(amount) or 0) > 0 then
@@ -1141,24 +1140,19 @@ Tabs.Players:AddButton({
                                 if sentOne() then break end
                             end
                         end
+
                     elseif GiftType == "Match_Eggs" then
                         local typeOn = next(Configuration.Players.Egg_Types)     ~= nil
                         local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
-                    
+
                         for _, Egg in pairs(OwnedEggData:GetChildren()) do
                             if Egg and not Egg:FindFirstChild("DI") then
                                 local t = Egg:GetAttribute("T") or "BasicEgg"
                                 local m = Egg:GetAttribute("M") or "None"
-                    
-                                -- ถ้าไม่เลือก Type ใดๆ = ผ่านทุก Type
-                                local okT = (not typeOn) or (Configuration.Players.Egg_Types[t] == true)
-                    
-                                -- ✅ ถ้าไม่เลือก Mutation เลย => รับเฉพาะ m == "None"
-                                --    ถ้าเลือกแล้ว => ต้องตรงกับที่ติ๊กไว้
-                                local okM = (mutOn and (Configuration.Players.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
-                                                            
 
-                    
+                                local okT = (not typeOn) or (Configuration.Players.Egg_Types[t] == true)
+                                local okM = (mutOn and (Configuration.Players.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
+
                                 if okT and okM then
                                     CharacterRE:FireServer("Focus", Egg.Name) task.wait(0.75)
                                     GiftRE:FireServer(GiftPlayer)             task.wait(0.75)
@@ -1176,7 +1170,7 @@ Tabs.Players:AddButton({
 })
 Tabs.Players:AddSection("Settings")
 local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
-Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Eggs_And_Foods","All_Foods","Select_Foods","Match_Eggs","All_Eggs"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
+Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"All_Pets","Range_Pets","Match Pet","Match Pet&Mutation","All_Eggs_And_Foods","All_Foods","Select_Foods","Match_Eggs","All_EggS"}, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectType = v end })
 Tabs.Players:AddInput("Gift Count Limit", { Title = "จำนวนที่จะส่ง (เว้นว่าง=ทั้งหมด)", Default = "", Numeric = true, Finished = true, Callback = function(v) Configuration.Players.Gift_Limit = v end })
 Tabs.Players:AddInput("GiftPet_MinIncome", { Title = "Min income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Min or 0), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Min = tonumber(v) or 0 end })
 Tabs.Players:AddInput("GiftPet_MaxIncome", { Title = "Max income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Max or 1000000), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Max = tonumber(v) or 1000000 end })
@@ -1220,6 +1214,7 @@ Tabs.Players:AddDropdown("Gift Egg Mutations", { Title = "Egg Mutations to Gift 
 Tabs.Players:AddDropdown("Pet Type",{ Title = "Select Pet Type", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Type = v end })
 Tabs.Players:AddDropdown("Pet Mutations",{ Title = "Select Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Mutations = v end })
 table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList) Players_Dropdown:SetValues(newList) end))
+
 --============================== Inventory =============================
 Tabs.Inv:AddParagraph({ Title = "Eggs", Content = "Your Egg Collection  •  View all eggs in your inventory" })
 local ResultPara = Tabs.Inv:AddParagraph({ Title = "Summary", Content = "กดปุ่ม Refresh เพื่อดึงข้อมูลล่าสุด…" })
@@ -1263,6 +1258,7 @@ Tabs.Inv:AddButton({
     end
 })
 task.defer(function() ResultPara:SetDesc(renderSummary()) end)
+
 --============================== Sell =============================
 Tabs.Sell:AddSection("Main")
 Tabs.Sell:AddDropdown("Sell Mode", { Title = "Sell Mode", Values = { "All_Unplaced_Pets", "All_Unplaced_Eggs", "Filter_Eggs", "Pets_Below_Income" }, Multi = false, Default = "", Callback = function(v) Configuration.Sell.Mode = v end })
@@ -1391,8 +1387,19 @@ Window:SelectTab(1)
 Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
 Perf_Set3DEnabled(not (Configuration.Perf.Disable3D == true))
 
+-- ==== NEW: Re-apply FPS Lock after autoload (autoload ไม่ยิง callback) ====
+SaveManager:LoadAutoloadConfig()
+if Configuration.Perf.FPSLock or (getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.locked) then
+    if getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.cap then
+        Configuration.Perf.FPSValue = getgenv().MEOWY_FPS.cap
+    end
+    ApplyFPSLock()
+end
+
+getgenv().MeowyBuildAZoo = Window
+
 --==============================================================
---                    TASK LOOPS (UNCHANGED)
+--                    TASK LOOPS (UNCHANGED + WATCHDOG)
 --==============================================================
 
 -- ===== Anti AFK
@@ -1407,6 +1414,21 @@ task.defer(function()
             VirtualUser:ClickButton2(Vector2.new())
         end
         task.wait(30)
+    end
+end)
+
+-- ===== NEW: FPS WATCHDOG (ย้ำ cap กันโดนทับ)
+task.defer(function()
+    while RunningEnvirontments do
+        if _setFPSCap and (Configuration.Perf.FPSLock or (G.MEOWY_FPS and G.MEOWY_FPS.locked)) then
+            local want = math.max(5, math.floor(tonumber(Configuration.Perf.FPSValue) or (G.MEOWY_FPS.cap or 60)))
+            if not G.MEOWY_FPS or G.MEOWY_FPS.cap ~= want then
+                G.MEOWY_FPS = G.MEOWY_FPS or {}
+                G.MEOWY_FPS.cap = want
+            end
+            _setFPSCap(G.MEOWY_FPS.cap)
+        end
+        task.wait(2) -- ปรับเป็น 0.5 ได้ถ้าอยาก “หนึบ” ขึ้น
     end
 end)
 
@@ -1648,15 +1670,13 @@ end)
 task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 
-    -- อ่านรายได้/วิ จาก UI; ถ้า nil ให้ถือเป็น 0
     local function incomeOf(uid: string)
         local inc = GetInventoryIncomePerSecByUID(uid)
         return tonumber(inc) or 0
     end
 
-    -- รวบรวม + เรียงลำดับ (desc) ตาม income/s แล้วคืน petCfg ตัวบนสุด
     local function pickPet()
-        local mode   = Configuration.Pet.PlacePet_Mode            -- "All" | "Match" | "Range"
+        local mode   = Configuration.Pet.PlacePet_Mode
         local typeOn = (mode == "Match") and (next(Configuration.Pet.PlacePet_Types)     ~= nil)
         local mutOn  = (mode == "Match") and (next(Configuration.Pet.PlacePet_Mutations) ~= nil)
 
@@ -1666,12 +1686,10 @@ task.defer(function()
             maxV = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
         end
 
-        -- เก็บ candidate: { cfg = petCfg, inc = number }
         local candidates = {}
 
         for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
             local uid = petCfg.Name
-            -- “ยังไม่ถูกวาง” = ไม่มีอยู่ในตาราง OwnedPets
             if not OwnedPets[uid] then
                 local pass = false
 
@@ -1686,7 +1704,7 @@ task.defer(function()
                     if mutOn then
                         okM = Configuration.Pet.PlacePet_Mutations[m]
                     else
-                        okM = (m == "None")  -- ไม่ได้เลือกมิวเทชัน => เอาเฉพาะ None
+                        okM = (m == "None")
                     end
                     pass = (okT and okM)
                 elseif mode == "Range" then
@@ -1704,12 +1722,10 @@ task.defer(function()
             return nil
         end
 
-        -- เรียงจากมาก -> น้อย
         table.sort(candidates, function(a, b)
             return (a.inc or 0) > (b.inc or 0)
         end)
 
-        -- คืนตัวที่รายได้/วิ สูงสุด
         return candidates[1].cfg
     end
 
@@ -1779,14 +1795,16 @@ Window.Root.Destroying:Once(function()
     -- restore visual states
     ApplyHidePets(false)
     ApplyHideEggs(false)
-    ApplyHideEffects(false)  -- false = enable effects
+    ApplyHideEffects(false)
     ApplyHideGameUI(false)
-    if _setFPSCap then _setFPSCap(1000) end
+    -- ==== PATCH: อย่าปลดล็อกถ้ายังตั้งให้ล็อกอยู่ ====
+    if _setFPSCap and not (getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.locked) then
+        _setFPSCap(1000)
+    end
     for _,connection in pairs(EnvirontmentConnections) do
         if connection then pcall(function() connection:Disconnect() end) end
     end
     Perf_Set3DEnabled(true)
 end)
 
-SaveManager:LoadAutoloadConfig()
-getgenv().MeowyBuildAZoo = Window
+-- (autoload ถูกย้ายขึ้นไปก่อนหน้านี้เพื่อรี-แอพลาย FPS Lock หลังโหลดคอนฟิก)
