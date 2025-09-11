@@ -47,7 +47,6 @@ Tabs.MainSection = Window:Section({ Title = "🤖 Auto Helpers", Opened = true }
 Tabs.MainTab = Tabs.MainSection:Tab({ Title = "🏠 | Main"})
 Tabs.PlaceTab = Tabs.MainSection:Tab({ Title = "🏠 | Place Eggs"})
 Tabs.HatchTab = Tabs.MainSection:Tab({ Title = "⚡ | Hatch Eggs"})
-Tabs.ClaimTab = Tabs.MainSection:Tab({ Title = "💰 | Get Money"})
 Tabs.ShopTab = Tabs.MainSection:Tab({ Title = "🛒 | Shop"})
 Tabs.PackTab = Tabs.MainSection:Tab({ Title = "🎁 | Get Packs"})
 Tabs.FruitTab = Tabs.MainSection:Tab({ Title = "🍎 | Fruit Store"})
@@ -1197,7 +1196,7 @@ local function runAutoClaim()
     end
 end
 
-local autoClaimToggle = Tabs.ClaimTab:Toggle({
+local autoClaimToggle = Tabs.MainTab:Toggle({
     Title = "💰 Auto Get Money",
     Desc = "Automatically collects money from your pets",
     Value = false,
@@ -1219,7 +1218,7 @@ local autoClaimToggle = Tabs.ClaimTab:Toggle({
 
 
 
-local autoClaimDelaySlider = Tabs.ClaimTab:Slider({
+local autoClaimDelaySlider = Tabs.MainTab:Slider({
     Title = "⏰ Claim Speed",
     Desc = "How fast to collect money (lower = faster)",
     Default = 100,
@@ -1231,23 +1230,6 @@ local autoClaimDelaySlider = Tabs.ClaimTab:Slider({
     end
 })
 
-Tabs.ClaimTab:Button({
-    Title = "💰 Get All Money Now",
-    Desc = "Collect money from all pets right now",
-    Callback = function()
-        local names = getOwnedPetNames()
-        if #names == 0 then
-            WindUI:Notify({ Title = "💰 Auto Claim", Content = "No pets found", Duration = 3 })
-            return
-        end
-        local count = 0
-        for _, n in ipairs(names) do
-            if claimMoneyForPet(n) then count += 1 end
-            task.wait(0.05)
-        end
-        WindUI:Notify({ Title = "💰 Auto Claim", Content = string.format("Got money from %d pets! 🎉", count), Duration = 3 })
-    end
-})
 
 -- ============ Auto Hatch ============
 
