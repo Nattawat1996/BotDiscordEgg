@@ -1142,7 +1142,7 @@ Tabs.Players:AddButton({
                         end
 
                     elseif GiftType == "Match_Eggs" then
-                        -- helper: รองรับทั้ง map ({X=true}) และ array ({"X","Y"})
+                        -- รองรับทั้งรูปแบบ map ({X=true}) และ array ({"X","Y"})
                         local function isPicked(tbl, key)
                             if type(tbl) ~= "table" then return false end
                             if tbl[key] == true then return true end
@@ -1155,18 +1155,14 @@ Tabs.Players:AddButton({
                         local typeOn = next(Configuration.Players.Egg_Types)     ~= nil
                         local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
                     
-                        -- จัดกลุ่มไข่ตาม mutation (ผ่านตัวกรอง type/mutation ก่อน)
+                        -- กลุ่มไข่ตาม mutation หลังผ่านตัวกรอง type/mutation
                         local buckets = {}  -- m -> { uid, uid, ... }
                         for _, Egg in ipairs(OwnedEggData:GetChildren()) do
-                            if Egg and not Egg:FindFirstChild("DI") then
+                            if Egg and not Egg:FindFirstChild("DI") then -- เฉพาะที่ยังไม่ถูกวาง
                                 local t = Egg:GetAttribute("T") or "BasicEgg"
                                 local m = Egg:GetAttribute("M") or "None"
                     
-                                -- ถ้าไม่เลือก type ใด ๆ = ผ่านทุก type
                                 local okT = (not typeOn) or isPicked(Configuration.Players.Egg_Types, t)
-                    
-                                -- ถ้าไม่เลือก mutation เลย = รับเฉพาะ None
-                                -- ถ้าเลือกแล้ว = ต้องอยู่ในชุดที่เลือก
                                 local okM = (mutOn and isPicked(Configuration.Players.Egg_Mutations, m))
                                          or ((not mutOn) and (m == "None"))
                     
@@ -1177,13 +1173,18 @@ Tabs.Players:AddButton({
                             end
                         end
                     
-                        -- โควตา "ต่อ mutation" (เช่น เลือก Dino+Fire และตั้ง 1 => Dino 1 ใบ + Fire 1 ใบ)
-                        local PER_LIMIT = tonumber(Configuration.Players.Gift_Limit) or 1
+                        -- โควตา "ต่อ mutation":
+                        -- ถ้าไม่กรอกจำนวน (nil/""/0/ค่าติดลบ) => ส่งทั้งหมดของ mutation นั้น
+                        local function perMutationLimit()
+                            local n = tonumber(Configuration.Players.Gift_Limit)
+                            if not n or n <= 0 then return math.huge end
+                            return math.floor(n)
+                        end
+                        local PER_LIMIT = perMutationLimit()
                     
-                        -- กำหนดลำดับ mutation ที่จะส่ง (ตามที่ผู้ใช้เลือก)
+                        -- ลำดับ mutation ตามที่ผู้ใช้เลือก
                         local order = {}
                         if mutOn then
-                            -- ถ้า Fluent ส่งมาเป็น array จะมี #tbl > 0
                             if type(Configuration.Players.Egg_Mutations) == "table" and #Configuration.Players.Egg_Mutations > 0 then
                                 for _, m in ipairs(Configuration.Players.Egg_Mutations) do table.insert(order, m) end
                             else
@@ -1193,7 +1194,8 @@ Tabs.Players:AddButton({
                             order = { "None" }
                         end
                     
-                        -- ส่งทีละ mutation ตามโควตา PER_LIMIT
+                        -- ส่งตามโควตาต่อ mutation
+                        local totalSent = 0
                         for _, m in ipairs(order) do
                             local list = buckets[m] or {}
                             local count = math.min(PER_LIMIT, #list)
@@ -1202,9 +1204,13 @@ Tabs.Players:AddButton({
                                 CharacterRE:FireServer("Focus", uid) task.wait(0.75)
                                 GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
                                 CharacterRE:FireServer("Focus")
-                                -- ไม่ใช้ LIMIT รวม เพื่อไม่ให้ “mutation อื่น” ถูกกันโควตา
+                                totalSent += 1
                             end
                         end
+                    
+                        if totalSent == 0 then
+                            Fluent:Notify({ Title = "Match_Eggs", Content = "ไม่พบไข่ที่ตรงเงื่อนไข (หรือถูกวางไว้แล้ว)", Duration = 4 })
+                        end                    
                     end
                     Configuration.Waiting = false
                 end },
