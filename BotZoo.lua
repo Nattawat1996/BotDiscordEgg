@@ -1,6 +1,7 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
--- NewV2.lua
+-- Reorganized version: helpers grouped at top, logic unchanged
+-- + FPS Lock fix (sticky state + safe cleanup)
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -547,7 +548,7 @@ end
 --                      CONFIG / UI
 --==============================================================
 Configuration = {
-    Main = { AutoCollect=false, Collect_Delay=30, Collect_Type="Delay", Collect_Between={Min=100000,Max=1000000}, },
+    Main = { AutoCollect=false, Collect_Delay=3, Collect_Type="Delay", Collect_Between={Min=100000,Max=1000000}, },
     Pet  = {
         AutoFeed=false, AutoFeed_Foods={}, AutoPlacePet=false, AutoFeed_Delay=10, AutoFeed_Type="",AutoFeed_Pets = {}, AutoFeed_PetFoods = {}, 
         AutoFeed_UsePerPet = true,
@@ -801,7 +802,7 @@ local Options = Fluent.Options
 Tabs.Main:AddSection("Main")
 Tabs.Main:AddToggle("AutoCollect",{ Title = "Auto Collect", Default = false, Callback = function(v) Configuration.Main.AutoCollect = v end })
 Tabs.Main:AddSection("Settings")
-Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 5, Min = 30, Max = 180, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
+Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 3, Min = 3, Max = 180, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
 Tabs.Main:AddDropdown("CollectCash Type",{ Title = "Select Type", Values = {"Delay","Between"}, Multi = false, Default = "Delay", Callback = function(v) Configuration.Main.Collect_Type = v end })
 Tabs.Main:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Min = tonumber(v) end })
 Tabs.Main:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Max = tonumber(v) end })
@@ -1654,13 +1655,18 @@ task.defer(function()
                 local RE = pet.RE
                 local Coin = tonumber(pet.Coin)
                 if Configuration.Main.Collect_Type == "Delay" then
-                    if RE then RE:FireServer("Claim") end
+                    if RE then RE:FireServer("Claim") 
+                        task.wait(Configuration.Main.Collect_Delay)
+                    end
+                    
                 elseif Configuration.Main.Collect_Type == "Between" and (Configuration.Main.Collect_Between.Min < Coin and Coin < Configuration.Main.Collect_Between.Max) then
-                    if RE then RE:FireServer("Claim") end
+                    if RE then RE:FireServer("Claim") 
+                        task.wait(Configuration.Main.Collect_Delay)
+                    end
                 end
             end
         end
-        task.wait(Configuration.Main.Collect_Delay)
+        
     end
 end)
 
