@@ -1,7 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
--- Reorganized version: helpers grouped at top, logic unchanged
--- + FPS Lock fix (sticky state + watchdog + safe cleanup)
+-- NewV2.lua
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -550,7 +549,7 @@ end
 Configuration = {
     Main = { AutoCollect=false, Collect_Delay=30, Collect_Type="Delay", Collect_Between={Min=100000,Max=1000000}, },
     Pet  = {
-        AutoFeed=false, AutoFeed_Foods={}, AutoPlacePet=false, AutoFeed_Delay=3, AutoFeed_Type="",AutoFeed_Pets = {}, AutoFeed_PetFoods = {}, 
+        AutoFeed=false, AutoFeed_Foods={}, AutoPlacePet=false, AutoFeed_Delay=10, AutoFeed_Type="",AutoFeed_Pets = {}, AutoFeed_PetFoods = {}, 
         AutoFeed_UsePerPet = true,
         CollectPet_Type="All", CollectPet_Auto=false, CollectPet_Mutations={}, CollectPet_Pets={},
         CollectPet_Delay=5, CollectPet_Between={Min=100000,Max=1000000}, CollectPet_Area="Any",
@@ -937,7 +936,7 @@ Tabs.Pet:AddButton({
 })
 
 Tabs.Pet:AddSection("Settings")
-Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
+Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 10, Min = 10, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
 Tabs.Pet:AddSlider("AutoCollectPet Delay",{ Title = "Auto Collect Pet Delay", Default = 5, Min = 5, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.CollectPet_Delay = v end })
 --== (NEW) Per-Pet Food Picker =========================================
 -- === Label ↔ UID mapping (ประกาศไว้ก่อนใช้ทุกที่) ===
@@ -1627,7 +1626,7 @@ end
 getgenv().MeowyBuildAZoo = Window
 
 --==============================================================
---                    TASK LOOPS (UNCHANGED + WATCHDOG)
+--                    TASK LOOPS (UNCHANGED)
 --==============================================================
 
 -- ===== Anti AFK
@@ -1645,20 +1644,6 @@ task.defer(function()
     end
 end)
 
--- ===== NEW: FPS WATCHDOG (ย้ำ cap กันโดนทับ)
-task.defer(function()
-    while RunningEnvirontments do
-        if _setFPSCap and (Configuration.Perf.FPSLock or (G.MEOWY_FPS and G.MEOWY_FPS.locked)) then
-            local want = math.max(5, math.floor(tonumber(Configuration.Perf.FPSValue) or (G.MEOWY_FPS.cap or 60)))
-            if not G.MEOWY_FPS or G.MEOWY_FPS.cap ~= want then
-                G.MEOWY_FPS = G.MEOWY_FPS or {}
-                G.MEOWY_FPS.cap = want
-            end
-            _setFPSCap(G.MEOWY_FPS.cap)
-        end
-        task.wait(2) -- ปรับเป็น 0.5 ได้ถ้าอยาก “หนึบ” ขึ้น
-    end
-end)
 
 -- ===== Auto Collect coin from pets
 task.defer(function()
@@ -1686,32 +1671,28 @@ task.defer(function()
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
 
     while RunningEnvirontments do
-        if not Configuration.Pet.AutoFeed or Configuration.Waiting then
-            -- ถ้าไม่ได้เปิด AutoFeed → รอทิ้งยาว ๆ แล้วไปวนรอบใหม่
-            task.wait(2)
-            continue
-        end
+        if Configuration.Pet.AutoFeed and not Configuration.Waiting then
 
-        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
-        local Data_Inventory = InventoryData and InventoryData:GetAttributes() or {}
+            if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+            local Data_Inventory = InventoryData and InventoryData:GetAttributes() or {}
 
-        for _, petCfg in ipairs(Data_OwnedPets:GetChildren()) do
-            local uid = petCfg.Name
-            local petModel = OwnedPets[uid]
-            if not (petModel and petModel.IsBig) then continue end
+            for _, petCfg in ipairs(Data_OwnedPets:GetChildren()) do
+                local uid = petCfg.Name
+                local petModel = OwnedPets[uid]
+                if not (petModel and petModel.IsBig) then continue end
 
-            if not petCfg:GetAttribute("Feed") then
-                local Food = pickFoodPerPet(uid, Data_Inventory)
-                if Food and Food ~= "" then
-                    CharacterRE:FireServer("Focus", Food) task.wait(0.3)
-                    PetRE:FireServer("Feed", petModel.UID) task.wait(0.3)
-                    CharacterRE:FireServer("Focus")
-                    Data_Inventory[Food] = math.max(0, (tonumber(Data_Inventory[Food] or 0) or 0) - 1)
+                if not petCfg:GetAttribute("Feed") then
+                    local Food = pickFoodPerPet(uid, Data_Inventory)
+                    if Food and Food ~= "" then
+                        CharacterRE:FireServer("Focus", Food) task.wait(0.3)
+                        PetRE:FireServer("Feed", petModel.UID) task.wait(0.3)
+                        CharacterRE:FireServer("Focus")
+                        Data_Inventory[Food] = math.max(0, (tonumber(Data_Inventory[Food] or 0) or 0) - 1)
+                    end
                 end
             end
-        end
-
-        task.wait(tonumber(Configuration.Pet.AutoFeed_Delay) or 3)
+        end    
+        task.wait(Configuration.Pet.AutoFeed_Delay)
     end
 end)
 
