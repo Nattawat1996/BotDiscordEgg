@@ -1679,43 +1679,42 @@ task.defer(function()
     end
 end)
 
--- ===== Auto Feed Pet (เฉพาะ Big)
+-- ===== Auto Feed Pet (เฉพาะ Big) =====
 task.defer(function()
     local Data_OwnedPets = Data:WaitForChild("Pets",30)
     local PetRE = GameRemoteEvents:WaitForChild("PetRE")
     local CharacterRE = GameRemoteEvents:WaitForChild("CharacterRE")
 
-    while true and RunningEnvirontments do
-        if Configuration.Pet.AutoFeed and not Configuration.Waiting then
-            if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
-            local Data_Inventory = InventoryData:GetAttributes()
+    while RunningEnvirontments do
+        if not Configuration.Pet.AutoFeed or Configuration.Waiting then
+            -- ถ้าไม่ได้เปิด AutoFeed → รอทิ้งยาว ๆ แล้วไปวนรอบใหม่
+            task.wait(2)
+            continue
+        end
 
-            for _, petCfg in ipairs(Data_OwnedPets:GetChildren()) do
-                local uid = petCfg.Name
-                local petModel = OwnedPets[uid]
-                if not (petModel and petModel.IsBig) then continue end
+        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+        local Data_Inventory = InventoryData and InventoryData:GetAttributes() or {}
 
-                -- ถ้าเลือกเป้าหมายไว้ ให้ feed เฉพาะ UID ที่ถูกเลือก
-                local targets = Configuration.Pet.AutoFeed_Pets or {}
-                if next(targets) and not targets[uid] then
-                    continue
-                end
+        for _, petCfg in ipairs(Data_OwnedPets:GetChildren()) do
+            local uid = petCfg.Name
+            local petModel = OwnedPets[uid]
+            if not (petModel and petModel.IsBig) then continue end
 
-                if petCfg and not petCfg:GetAttribute("Feed") then
-                    -- ⬇️ ใช้ per-pet เท่านั้น
-                    local Food = pickFoodPerPet(uid, Data_Inventory)
-                    if Food and Food ~= "" then
-                        CharacterRE:FireServer("Focus", Food) task.wait(0.4)
-                        PetRE:FireServer("Feed", petModel.UID) task.wait(0.4)
-                        CharacterRE:FireServer("Focus")
-                        Data_Inventory[Food] = math.max(0, (tonumber(Data_Inventory[Food] or 0) or 0) - 1)
-                    end
+            if not petCfg:GetAttribute("Feed") then
+                local Food = pickFoodPerPet(uid, Data_Inventory)
+                if Food and Food ~= "" then
+                    CharacterRE:FireServer("Focus", Food) task.wait(0.3)
+                    PetRE:FireServer("Feed", petModel.UID) task.wait(0.3)
+                    CharacterRE:FireServer("Focus")
+                    Data_Inventory[Food] = math.max(0, (tonumber(Data_Inventory[Food] or 0) or 0) - 1)
                 end
             end
         end
+
         task.wait(tonumber(Configuration.Pet.AutoFeed_Delay) or 3)
     end
 end)
+
 
 
 
