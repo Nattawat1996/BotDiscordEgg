@@ -185,18 +185,34 @@ if locks then
     table.insert(EnvirontmentConnections, locks.ChildRemoved:Connect(function() task.defer(RebuildUnlockedPlots) end))
 end
 
+-- แทนที่ฟังก์ชัน GetFreeFarmParts เดิมทั้งหมด
 local function GetFreeFarmParts(area)
+    -- รายการหลัก: ใช้รายการปลดล็อกก่อน
     local list = (area == "Land" and UnlockedPlots.Land)
               or (area == "Water" and UnlockedPlots.Water)
               or UnlockedPlots.Any
+
+    -- Fallback: ถ้า Land/Water ว่าง ให้ใช้รายการดิบทั้งหมด (ไม่สนล็อกชั่วคราว)
+    if (area == "Land" or area == "Water") and (#list == 0) then
+        dprint("GetFreeFarmParts: unlocked list empty for", area, "-> fallback to SortedPlots")
+        list = (area == "Land" and SortedPlots.Land)
+            or (area == "Water" and SortedPlots.Water)
+            or SortedPlots.Any
+    end
+
+    -- กรองเฉพาะช่องที่ยังไม่ถูกจับจอง (ใช้ OCC เป็นหลัก)
     local res = {}
     for _, part in ipairs(list) do
         local ic = part:GetAttribute("IslandCoord")
         local k = ic and _keyXZ(ic.X, ic.Z)
-        if not (k and OCC.byKey[k]) then res[#res+1] = part end
+        if not (k and OCC.byKey[k]) then
+            res[#res+1] = part
+        end
     end
+    dprint("GetFreeFarmParts:", area, "free =", #res)
     return res
 end
+
 
 --==============================================================
 --                      HELPERS
