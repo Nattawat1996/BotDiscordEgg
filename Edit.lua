@@ -945,7 +945,7 @@ local function runAutoPlacePet(tok)
     while tok.alive do
         local uidsToPlace = getUnplacedPetUIDs()
         local filteredUIDs = filterPets(uidsToPlace)
-
+        dprint("AutoPlacePet: candidates=", #uidsToPlace, "after filter=", #filteredUIDs)
         if #filteredUIDs > 1 then
             table.sort(filteredUIDs, function(a,b)
                 return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
@@ -955,7 +955,11 @@ local function runAutoPlacePet(tok)
         if #filteredUIDs > 0 then
             local area = Configuration.Pet.PlaceArea or "Any"
             local availableFarmParts = GetFreeFarmParts(area)
-
+            if #availableFarmParts == 0 then
+                dprint("AutoPlacePet: no free tiles → rebuilding unlocks")
+                RebuildUnlockedPlots()
+                availableFarmParts = GetFreeFarmParts(area)
+            end
             for _, uid in ipairs(filteredUIDs) do
                 if not tok.alive or #availableFarmParts == 0 then break end
                 local partToTry = findAvailableFarmPartNearPosition(availableFarmParts, 4, getPlayerRootPosition())
@@ -970,7 +974,8 @@ local function runAutoPlacePet(tok)
 
                     dprint("Waiting for pet model confirmation for:", uid)
                     local petModel = Pet_Folder:WaitForChild(uid, 3)
-                    if not petModel and lockKey then OCC.byKey[lockKey] = nil else dprint("Placed:", uid) end
+                    if not petModel and lockKey then OCC.byKey[lockKey] = nil 
+                    else dprint("Placed:", uid) end
                     task.wait(0.2)
                 else
                     dprint("AutoPlacePet: No more available parts found.")
