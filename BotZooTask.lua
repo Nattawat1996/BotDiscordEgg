@@ -551,7 +551,7 @@ for i,pet in pairs(Pet_Folder:GetChildren()) do
             Type = (petPrimaryPart:GetAttribute("Type")),
             Mutate = (petPrimaryPart:GetAttribute("Mutate")),
             Model = pet, RootPart = petPrimaryPart,
-            RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true")),
+            RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE", true)),
             IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))
         },{
             __index = (function(tb, ind)
