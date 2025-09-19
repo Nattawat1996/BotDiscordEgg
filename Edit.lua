@@ -128,10 +128,38 @@ local function _occ_byDI(di, val)
 end
 local function RebuildOccupancy()
     OCC.byKey, OCC.count = {}, 0
-    for _, petNode in ipairs(OwnedPetData:GetChildren()) do local di = petNode:FindFirstChild("DI"); if di then _occ_byDI(di, true) end end
-    for _, eggNode in ipairs(OwnedEggData:GetChildren()) do local di = eggNode:FindFirstChild("DI"); if di then _occ_byDI(di, true) end end
+
+    -- Pets: นับเฉพาะที่ถูกวางจริง ๆ (มี Model อยู่ใน workspace.Pets)
+    local petsInWorld = Pet_Folder
+    for _, petNode in ipairs(OwnedPetData:GetChildren()) do
+        local di = petNode:FindFirstChild("DI")
+        if di and petsInWorld:FindFirstChild(petNode.Name) then
+            _occ_byDI(di, true)
+        end
+    end
+
+    -- Eggs: นับปกติ (มี DI ก็ตือว่าวางอยู่จริง)
+    for _, eggNode in ipairs(OwnedEggData:GetChildren()) do
+        local di = eggNode:FindFirstChild("DI")
+        if di then _occ_byDI(di, true) end
+    end
 end
+
 RebuildOccupancy()
+
+local function _occ_set_pet_uid(uid, val)
+    local n = OwnedPetData:FindFirstChild(uid)
+    local di = n and n:FindFirstChild("DI")
+    if di then _occ_byDI(di, val) end
+end
+
+-- เมื่อสัตว์ถูกวางลง/ถูกลบออก ให้ปรับสถานะ OCC ของช่องนั้น
+table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(function(m)
+    task.defer(function() _occ_set_pet_uid(m.Name, true) end)
+end))
+table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(function(m)
+    task.defer(function() _occ_set_pet_uid(m.Name, false) end)
+end))
 
 local function _watchDIUnder(node)
     if not node or not node:IsA("Folder") then return end
