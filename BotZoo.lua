@@ -52,7 +52,7 @@ local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
 local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 local OwnedPets = {}
 local Egg_Belt = {}
-
+local Configuration
 --==============================================================
 --                      HELPERS (GROUPED)
 --          (No behavior change; only re-ordered)
@@ -505,7 +505,7 @@ end
 --==============================================================
 --                      CONFIG / UI
 --==============================================================
-local Configuration = {
+Configuration = {
     Main = { AutoCollect=false, Collect_Delay=30, Collect_Type="Delay", Collect_Between={Min=100000,Max=1000000}, },
     Pet  = {
         AutoFeed=false, AutoFeed_Foods={}, AutoPlacePet=false, AutoFeed_Delay=3, AutoFeed_Type="",
