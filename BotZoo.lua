@@ -391,6 +391,23 @@ local function pickFoodSelect(invAttrs)
     return nil
 end
 
+-- วาร์ปไปยืน "ด้านหน้า" ผู้เล่นเป้าหมาย 1 ครั้ง
+local function WarpInFrontOfPlayer(plr)
+    if not plr then return end
+    local myChar = Player.Character
+    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local tChar  = plr.Character
+    local tHRP   = tChar and tChar:FindFirstChild("HumanoidRootPart")
+    if not (myHRP and tHRP) then return end
+
+    -- จุด "หน้าตัว" ของเป้าหมาย ระยะ ~3 studs แล้วลอยขึ้น ~3 studs ป้องกันติดพื้น/ชน
+    local frontPos = (tHRP.CFrame * CFrame.new(0, 0, -3)).Position
+    local dst = frontPos + Vector3.new(0, 3, 0)
+
+    myHRP.CFrame = CFrame.new(dst)
+    task.wait(0.4) -- เว้นนิดให้เซิร์ฟเวอร์ sync ตำแหน่ง
+end
+
 --==============================================================
 --              DYNAMIC STATE (OwnedPets, Egg_Belt, etc.)
 --==============================================================
@@ -1000,7 +1017,10 @@ Tabs.Players:AddButton({
                     local GiftType = Configuration.Players.SelectType
                     local GiftPlayer = Players:FindFirstChild(Configuration.Players.SelectPlayer)
                     if not GiftPlayer then return end
-
+                
+                    -- == NEW: วาร์ปไปอยู่หน้าผู้เล่นเป้าหมาย 1 ครั้ง ก่อนเริ่มส่ง ==
+                    WarpInFrontOfPlayer(GiftPlayer)
+                
                     local function _limit()
                         local n = tonumber(Configuration.Players.Gift_Limit)
                         return (n and n > 0) and n or math.huge
@@ -1011,9 +1031,9 @@ Tabs.Players:AddButton({
                         sent = sent + 1
                         return sent >= LIMIT
                     end
-
+                
                     Configuration.Waiting = true
-
+                
                     if GiftType == "All_Pets" then
                         for _, PetData in pairs(OwnedPetData:GetChildren()) do
                             if PetData and not PetData:GetAttribute("D") then
@@ -1022,11 +1042,10 @@ Tabs.Players:AddButton({
                                 if sentOne() then break end
                             end
                         end
-
+                
                     elseif GiftType == "Range_Pets" then
                         local minV = tonumber(Configuration.Players.GiftPet_Between.Min) or 0
                         local maxV = tonumber(Configuration.Players.GiftPet_Between.Max) or math.huge
-
                         for _, PetData in pairs(OwnedPetData:GetChildren()) do
                             if PetData and not PetData:GetAttribute("D") then
                                 local uid = PetData.Name
@@ -1040,7 +1059,7 @@ Tabs.Players:AddButton({
                                 end
                             end
                         end
-
+                
                     elseif GiftType == "Match Pet" then
                         for _, PetData in pairs(OwnedPetData:GetChildren()) do
                             if PetData then
@@ -1052,7 +1071,7 @@ Tabs.Players:AddButton({
                                 end
                             end
                         end
-
+                
                     elseif GiftType == "Match Pet&Mutation" then
                         for _, PetData in pairs(OwnedPetData:GetChildren()) do
                             if PetData then
@@ -1065,11 +1084,11 @@ Tabs.Players:AddButton({
                                 end
                             end
                         end
-
+                
                     elseif GiftType == "All_Eggs_And_Foods" then
                         if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
                         local invAttrs = (InventoryData and InventoryData:GetAttributes()) or {}
-
+                
                         local LIMIT = _limit()
                         local sent  = 0
                         local function trySendFocus(name: string)
@@ -1079,7 +1098,7 @@ Tabs.Players:AddButton({
                             sent = sent + 1
                             return (sent >= LIMIT)
                         end
-
+                
                         for _, Egg in ipairs(OwnedEggData:GetChildren()) do
                             if Egg and not Egg:FindFirstChild("DI") then
                                 if trySendFocus(Egg.Name) then break end
@@ -1096,7 +1115,7 @@ Tabs.Players:AddButton({
                                 end
                             end
                         end
-
+                
                     elseif GiftType == "All_Foods" then
                         if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
                         for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
@@ -1109,13 +1128,13 @@ Tabs.Players:AddButton({
                                 if sent >= LIMIT then break end
                             end
                         end
-
+                
                     elseif GiftType == "Select_Foods" then
                         if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
                         local inv = InventoryData and InventoryData:GetAttributes() or {}
                         local selected = Configuration.Players.Food_Selected or {}
                         local amounts  = Configuration.Players.Food_Amounts  or {}
-
+                
                         for foodName, picked in pairs(selected) do
                             if picked and table.find(PetFoods_InGame, foodName) then
                                 local have = tonumber(inv[foodName] or 0)
@@ -1129,7 +1148,7 @@ Tabs.Players:AddButton({
                                 if sent >= LIMIT then break end
                             end
                         end
-
+                
                     elseif GiftType == "All_Eggs" then
                         for _, Egg in pairs(OwnedEggData:GetChildren()) do
                             if Egg and not Egg:FindFirstChild("DI") then
@@ -1138,49 +1157,38 @@ Tabs.Players:AddButton({
                                 if sentOne() then break end
                             end
                         end
-
+                
                     elseif GiftType == "Match_Eggs" then
-                        -- รองรับทั้งรูปแบบ map ({X=true}) และ array ({"X","Y"})
                         local function isPicked(tbl, key)
                             if type(tbl) ~= "table" then return false end
                             if tbl[key] == true then return true end
-                            for _, v in ipairs(tbl) do
-                                if v == key then return true end
-                            end
+                            for _, v in ipairs(tbl) do if v == key then return true end end
                             return false
                         end
-                    
                         local typeOn = next(Configuration.Players.Egg_Types)     ~= nil
                         local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
-                    
-                        -- กลุ่มไข่ตาม mutation หลังผ่านตัวกรอง type/mutation
-                        local buckets = {}  -- m -> { uid, uid, ... }
+                
+                        local buckets = {}
                         for _, Egg in ipairs(OwnedEggData:GetChildren()) do
-                            if Egg and not Egg:FindFirstChild("DI") then -- เฉพาะที่ยังไม่ถูกวาง
+                            if Egg and not Egg:FindFirstChild("DI") then
                                 local t = Egg:GetAttribute("T") or "BasicEgg"
                                 local m = Egg:GetAttribute("M") or "None"
-                    
                                 local okT = (not typeOn) or isPicked(Configuration.Players.Egg_Types, t)
-                                local okM = (mutOn and isPicked(Configuration.Players.Egg_Mutations, m))
-                                         or ((not mutOn) and (m == "None"))
-                    
+                                local okM = (mutOn and isPicked(Configuration.Players.Egg_Mutations, m)) or ((not mutOn) and (m == "None"))
                                 if okT and okM then
                                     buckets[m] = buckets[m] or {}
                                     table.insert(buckets[m], Egg.Name)
                                 end
                             end
                         end
-                    
-                        -- โควตา "ต่อ mutation":
-                        -- ถ้าไม่กรอกจำนวน (nil/""/0/ค่าติดลบ) => ส่งทั้งหมดของ mutation นั้น
+                
                         local function perMutationLimit()
                             local n = tonumber(Configuration.Players.Gift_Limit)
                             if not n or n <= 0 then return math.huge end
                             return math.floor(n)
                         end
                         local PER_LIMIT = perMutationLimit()
-                    
-                        -- ลำดับ mutation ตามที่ผู้ใช้เลือก
+                
                         local order = {}
                         if mutOn then
                             if type(Configuration.Players.Egg_Mutations) == "table" and #Configuration.Players.Egg_Mutations > 0 then
@@ -1191,8 +1199,7 @@ Tabs.Players:AddButton({
                         else
                             order = { "None" }
                         end
-                    
-                        -- ส่งตามโควตาต่อ mutation
+                
                         local totalSent = 0
                         for _, m in ipairs(order) do
                             local list = buckets[m] or {}
@@ -1205,11 +1212,11 @@ Tabs.Players:AddButton({
                                 totalSent += 1
                             end
                         end
-                    
                         if totalSent == 0 then
                             Fluent:Notify({ Title = "Match_Eggs", Content = "ไม่พบไข่ที่ตรงเงื่อนไข (หรือถูกวางไว้แล้ว)", Duration = 4 })
-                        end                    
+                        end
                     end
+                
                     Configuration.Waiting = false
                 end },
                 { Title = "No", Callback = function() end }
