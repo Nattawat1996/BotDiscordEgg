@@ -55,13 +55,19 @@ local Egg_Belt = {}
 local Configuration
 
 --==============================================================
--- TASK MANAGER
+-- TASK MANAGER (patched)
 --==============================================================
 local TaskMgr = {}
 TaskMgr._tasks = {} -- name -> { thread=thread, cancel=function(), ctx=ctx }
 
 function TaskMgr.start(name, runner)
-    TaskMgr.stop(name) -- stop if exists
+    -- ป้องกันเรียกฟังก์ชันที่ยังไม่ถูกประกาศ
+    if type(runner) ~= "function" then
+        warn("[TaskMgr]["..tostring(name).."] skip start: runner is nil (not ready yet)")
+        return
+    end
+
+    TaskMgr.stop(name)
 
     local ctx = { cancelled = false }
     function ctx.sleep(sec)
@@ -1374,7 +1380,7 @@ Window:SelectTab(1)
 Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
 Perf_Set3DEnabled(not (Configuration.Perf.Disable3D == true))
 
-SaveManager:LoadAutoloadConfig()
+
 if Configuration.Perf.FPSLock or (getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.locked) then
     if getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.cap then
         Configuration.Perf.FPSValue = getgenv().MEOWY_FPS.cap
@@ -1779,8 +1785,8 @@ local function _autostart()
     if Configuration.Event.AutoClaim then TaskMgr.start("AutoClaim", runAutoClaim) end
     if Configuration.Event.AutoLottery then TaskMgr.start("AutoLottery", runAutoLottery) end
 end
+SaveManager:LoadAutoloadConfig()
 _autostart()
-
 --==============================================================
 --                        CLEANUP / DESTROY
 --==============================================================
