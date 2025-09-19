@@ -79,6 +79,15 @@ end
 --==============================================================
 --                      OPTIMIZATION BLOCKS
 --==============================================================
+-- ใช้ขอบเขตของแผ่น (BasePart) จริง ๆ ใน local space
+local function _posInsideTileRect(tilePart: BasePart, worldPos: Vector3, shrink: number?)
+    -- shrink = ระยะหดขอบข้างละกี่หน่วยกัน false-positive จากของที่เกยขอบ
+    local pad = tonumber(shrink) or 0.15
+    local rel = tilePart.CFrame:PointToObjectSpace(worldPos)
+    return (math.abs(rel.X) <= (tilePart.Size.X * 0.5 - pad))
+        and (math.abs(rel.Z) <= (tilePart.Size.Z * 0.5 - pad))
+end
+
 
 -- ========= 1) Plot index cache + Occupied set (base index) =========
 local PlotIndex = {}              -- "x,z" -> {part=..., area=..}
@@ -258,19 +267,31 @@ local function anchorOf(inst: Instance)
 end
 
 -- Proximity fallback (ยังคงไว้ใช้ระยะจำเป็น)
-local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
-    local R = radius or 5
+local function IsOccupiedTile(farmPart: BasePart)
+    -- สแกนเฉพาะสัตว์ของทุกคนในแผนที่
     for _, P in ipairs(Pet_Folder:GetChildren()) do
-        local rp = anchorOf(P); if rp and (rp.Position - pos).Magnitude <= R then return true end
+        local rp = anchorOf(P)
+        if rp and _posInsideTileRect(farmPart, rp.Position, 0.15) then
+            return true
+        end
     end
+    -- สแกนบล็อค/ไข่ที่เป็นโมเดลในโลก
     for _, child in ipairs(BlockFolder:GetChildren()) do
-        local rp = anchorOf(child); if rp and (rp.Position - pos).Magnitude <= R then return true end
+        local rp = anchorOf(child)
+        if rp and _posInsideTileRect(farmPart, rp.Position, 0.15) then
+            return true
+        end
     end
-    for _, E in ipairs(OwnedEggData:GetChildren()) do
-        local di = E:FindFirstChild("DI")
-        if di then
-            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
-            if (v - pos).Magnitude <= R then return true end
+    -- ไข่ที่ยังไม่มีโมเดล (ดูจาก DI เทียบพิกัดช่องแบบกริด)
+    local ic = farmPart:GetAttribute("IslandCoord")
+    if ic then
+        local key = ("%d,%d"):format(ic.X, ic.Z)
+        for _, E in ipairs(OwnedEggData:GetChildren()) do
+            local di = E:FindFirstChild("DI")
+            if di then
+                local k2 = ("%d,%d"):format(di:GetAttribute("X") or 0, di:GetAttribute("Z") or 0)
+                if k2 == key then return true end
+            end
         end
     end
     return false
@@ -312,13 +333,13 @@ local function SellEgg(uid) if not uid or uid == "" then return false, "no uid" 
 local function SellPet(uid) if not uid or uid == "" then return false, "no uid" end CharacterRE:FireServer("Focus", uid) task.wait(0.1) local ok, err = pcall(function() PetRE:FireServer("Sell", uid) end) CharacterRE:FireServer("Focus") return ok, err end
 
 -- Occupancy check (ใช้ OCC ก่อน, ตกเหลือค่อย proximity)
-local function isFarmTileOccupied(farmPart, minDistance)
+local function isFarmTileOccupied(farmPart: BasePart)
     local ic = farmPart:GetAttribute("IslandCoord")
     if ic then
         local k = _keyXZ(ic.X, ic.Z)
-        if OCC.byKey[k] then return true end
+        if OCC.byKey[k] then return true end   -- ใช้แคชกริดก่อน
     end
-    return IsOccupiedAtPosition(farmPart.Position, (minDistance or 4) + 0.1)
+    return IsOccupiedTile(farmPart)            -- fallback แบบ “ศูนย์กลางช่อง”
 end
 
 --==============================================================
