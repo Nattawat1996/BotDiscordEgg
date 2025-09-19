@@ -55,11 +55,9 @@ local OwnedPets = {}
 local Egg_Belt = {}
 local Configuration
 
-
 -- ==== DEBUG flags ====
 local G = getgenv()
 G.MEOWY_DBG = G.MEOWY_DBG or { on = true, toast = false }
-
 local function _tos(v)
     local ok, t = pcall(function() return typeof(v) end)
     t = ok and t or type(v)
@@ -82,7 +80,7 @@ end
 --                      OPTIMIZATION BLOCKS
 --==============================================================
 
--- ========= 1) Plot index cache + Occupied set =========
+-- ========= 1) Plot index cache + Occupied set (base index) =========
 local PlotIndex = {}              -- "x,z" -> {part=..., area=..}
 local SortedPlots = { Any={}, Land={}, Water={} }
 do
@@ -107,22 +105,102 @@ do
     dprint("Plot counts -> Any=", #SortedPlots.Any, "Land=", #SortedPlots.Land, "Water=", #SortedPlots.Water)
 end
 
--- ========= Authoritative Occupied (rebuild on demand) =========
-local function _keyXZ(x,z)
-    return ("%d,%d"):format(math.floor((x or 0)+0.5), math.floor((z or 0)+0.5))
+-- ======== helpers for plot key/area ========
+local function _keyXZ(x,z) return ("%d,%d"):format(math.floor((x or 0)+0.5), math.floor((z or 0)+0.5)) end
+local function _areaFromXZ(x, z) local n = PlotIndex[_keyXZ(x,z)]; return n and n.area or "Any" end
+
+--==============================================================
+--            FAST OCCUPANCY & UNLOCKED PLOTS (NEW)
+--==============================================================
+local OCC = { byKey = {}, count = 0 }  -- ["x,z"] -> true
+local function _occ_set_xz(x, z, val)
+    local k = _keyXZ(x, z)
+    local had = OCC.byKey[k]
+    if val then
+        if not had then OCC.byKey[k] = true; OCC.count += 1 end
+    else
+        if had then OCC.byKey[k] = nil; OCC.count -= 1 end
+    end
+end
+local function _occ_byDI(di, val)
+    if not di then return end
+    _occ_set_xz(di:GetAttribute("X") or 0, di:GetAttribute("Z") or 0, val)
+end
+local function RebuildOccupancy()
+    OCC.byKey, OCC.count = {}, 0
+    for _, petNode in ipairs(OwnedPetData:GetChildren()) do local di = petNode:FindFirstChild("DI"); if di then _occ_byDI(di, true) end end
+    for _, eggNode in ipairs(OwnedEggData:GetChildren()) do local di = eggNode:FindFirstChild("DI"); if di then _occ_byDI(di, true) end end
+end
+RebuildOccupancy()
+
+local function _watchDIUnder(node)
+    if not node or not node:IsA("Folder") then return end
+    table.insert(EnvirontmentConnections, node.ChildAdded:Connect(function(ch) if ch.Name == "DI" then _occ_byDI(ch, true) end end))
+    table.insert(EnvirontmentConnections, node.ChildRemoved:Connect(function(ch) if ch.Name == "DI" then _occ_byDI(ch, false) end end))
+    local di = node:FindFirstChild("DI"); if di then _occ_byDI(di, true) end
+end
+for _, n in ipairs(OwnedPetData:GetChildren()) do _watchDIUnder(n) end
+for _, n in ipairs(OwnedEggData:GetChildren()) do _watchDIUnder(n) end
+table.insert(EnvirontmentConnections, OwnedPetData.ChildAdded:Connect(_watchDIUnder))
+table.insert(EnvirontmentConnections, OwnedEggData.ChildAdded:Connect(_watchDIUnder))
+
+-- -------- Unlocked plots cache --------
+local UnlockedPlots = { Any = {}, Land = {}, Water = {} }
+local function _farmLockedRects()
+    local rects = {}
+    local ENV = Island:FindFirstChild("ENV")
+    local Locks = ENV and ENV:FindFirstChild("Locks")
+    if not Locks then return rects end
+    for _, lockModel in ipairs(Locks:GetChildren()) do
+        local farm = lockModel:FindFirstChild("Farm")
+        if farm and farm:IsA("BasePart") and farm.Transparency == 0 then
+            table.insert(rects, { cf = farm.CFrame, sz = farm.Size })
+        end
+    end
+    return rects
+end
+local function _posInsideRect(cf, sz, worldPos)
+    local rel = cf:PointToObjectSpace(worldPos)
+    return (math.abs(rel.X) <= sz.X*0.5) and (math.abs(rel.Z) <= sz.Z*0.5)
+end
+local function RebuildUnlockedPlots()
+    local rects = _farmLockedRects()
+    local function isLocked(part)
+        for _, r in ipairs(rects) do if _posInsideRect(r.cf, r.sz, part.Position) then return true end end
+        return false
+    end
+    UnlockedPlots.Any, UnlockedPlots.Land, UnlockedPlots.Water = {}, {}, {}
+    for _, p in ipairs(SortedPlots.Any) do
+        if not isLocked(p) then
+            table.insert(UnlockedPlots.Any, p)
+            local area = (p.Name:match("^Water") and "Water") or "Land"
+            table.insert(UnlockedPlots[area], p)
+        end
+    end
+end
+RebuildUnlockedPlots()
+local locks = Island:FindFirstChild("ENV") and Island.ENV:FindFirstChild("Locks")
+if locks then
+    table.insert(EnvirontmentConnections, locks.ChildAdded:Connect(function() task.defer(RebuildUnlockedPlots) end))
+    table.insert(EnvirontmentConnections, locks.ChildRemoved:Connect(function() task.defer(RebuildUnlockedPlots) end))
 end
 
-local function _areaFromXZ(x, z)
-    local n = PlotIndex[_keyXZ(x,z)]
-    return n and n.area or "Any"
+local function GetFreeFarmParts(area)
+    local list = (area == "Land" and UnlockedPlots.Land)
+              or (area == "Water" and UnlockedPlots.Water)
+              or UnlockedPlots.Any
+    local res = {}
+    for _, part in ipairs(list) do
+        local ic = part:GetAttribute("IslandCoord")
+        local k = ic and _keyXZ(ic.X, ic.Z)
+        if not (k and OCC.byKey[k]) then res[#res+1] = part end
+    end
+    return res
 end
-
 
 --==============================================================
 --                      HELPERS
 --==============================================================
--- ================= Occupancy (drop-in) =================
--- Anchor finder (Model/BasePart)
 local function anchorOf(inst: Instance)
     if inst:IsA("Model") then
         return inst.PrimaryPart
@@ -135,52 +213,35 @@ local function anchorOf(inst: Instance)
     end
 end
 
--- Proximity occupancy check (แทนฟิสิกส์)
+-- Proximity fallback (ยังคงไว้ใช้ระยะจำเป็น)
 local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
     local R = radius or 5
-
-    -- 1) สัตว์ที่วางแล้ว (workspace.Pets)
     for _, P in ipairs(Pet_Folder:GetChildren()) do
-        local rp = anchorOf(P)
-        if rp and (rp.Position - pos).Magnitude <= R then
-            return true
-        end
+        local rp = anchorOf(P); if rp and (rp.Position - pos).Magnitude <= R then return true end
     end
-
-    -- 2) บล็อค/ไข่ที่วางแล้ว (workspace.PlayerBuiltBlocks)
     for _, child in ipairs(BlockFolder:GetChildren()) do
-        local rp = anchorOf(child)
-        if rp and (rp.Position - pos).Magnitude <= R then
-            return true
-        end
+        local rp = anchorOf(child); if rp and (rp.Position - pos).Magnitude <= R then return true end
     end
-
-    -- 3) ไข่จาก Data (ใช้ DI)
     for _, E in ipairs(OwnedEggData:GetChildren()) do
         local di = E:FindFirstChild("DI")
         if di then
-            local v = Vector3.new(
-                di:GetAttribute("X") or 0,
-                di:GetAttribute("Y") or 0,
-                di:GetAttribute("Z") or 0
-            )
-            if (v - pos).Magnitude <= R then
-                return true
-            end
+            local v = Vector3.new(di:GetAttribute("X") or 0, di:GetAttribute("Y") or 0, di:GetAttribute("Z") or 0)
+            if (v - pos).Magnitude <= R then return true end
         end
     end
-
     return false
 end
 
--- (Helper) ฟังก์ชันสำหรับวาร์ปตัวละครไปใกล้ตำแหน่งเป้าหมาย (เวอร์ชันบังคับวาร์ปทุกครั้ง)
+-- ensureNear (OP: วาร์ปเฉพาะไกลจริง)
+local PLACE_WARP_THRESHOLD = 35
 local function ensureNear(position)
-    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    local char = Player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    if (root.Position - position).Magnitude > 45 then
-        dprint("Teleporting to placement location to ensure proximity...")
+    if (root.Position - position).Magnitude > PLACE_WARP_THRESHOLD then
+        dprint("Teleporting (distance too far) ->", _tos(position))
         root.CFrame = CFrame.new(position + Vector3.new(0, 3, 0))
-        task.wait(0.15)
+        task.wait(0.12)
     end
 end
 
@@ -189,17 +250,8 @@ local function _toggleWhiteOverlay(show)
     if not pg then return end
     local gui = pg:FindFirstChild("PerfWhite") or Instance.new("ScreenGui")
     if not gui.Parent then
-        gui.Name = "PerfWhite"
-        gui.IgnoreGuiInset = true
-        gui.DisplayOrder = 1e9
-        gui.ResetOnSpawn = false
-        gui.Parent = pg
-        local f = Instance.new("Frame")
-        f.Name = "F"
-        f.Size = UDim2.fromScale(1,1)
-        f.BackgroundColor3 = Color3.new(1,1,1)
-        f.BackgroundTransparency = 0
-        f.Parent = gui
+        gui.Name = "PerfWhite"; gui.IgnoreGuiInset = true; gui.DisplayOrder = 1e9; gui.ResetOnSpawn = false; gui.Parent = pg
+        local f = Instance.new("Frame"); f.Name = "F"; f.Size = UDim2.fromScale(1,1); f.BackgroundColor3 = Color3.new(1,1,1); f.BackgroundTransparency = 0; f.Parent = gui
     end
     local frame = gui:FindFirstChild("F")
     if frame then frame.BackgroundTransparency = show and 0 or 1 end
@@ -211,73 +263,18 @@ local function Perf_Set3DEnabled(enable3D)
     if ok then _toggleWhiteOverlay(false) else _toggleWhiteOverlay(not enable3D) end
 end
 
-local function GetCash(TXT)
-    if not TXT then return 0 end
-    local cash = string.gsub(TXT,"[$,]","")
-    return tonumber(cash) or 0
-end
+local function GetCash(TXT) if not TXT then return 0 end local cash = string.gsub(TXT,"[$,]","") return tonumber(cash) or 0 end
+local function SellEgg(uid) if not uid or uid == "" then return false, "no uid" end CharacterRE:FireServer("Focus", uid) task.wait(0.1) local ok, err = pcall(function() PetRE:FireServer("Sell", uid, true) end) CharacterRE:FireServer("Focus") return ok, err end
+local function SellPet(uid) if not uid or uid == "" then return false, "no uid" end CharacterRE:FireServer("Focus", uid) task.wait(0.1) local ok, err = pcall(function() PetRE:FireServer("Sell", uid) end) CharacterRE:FireServer("Focus") return ok, err end
 
-local function SellEgg(uid)
-    if not uid or uid == "" then return false, "no uid" end
-    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
-    local ok, err = pcall(function() PetRE:FireServer("Sell", uid, true) end)
-    CharacterRE:FireServer("Focus")
-    return ok, err
-end
-local function SellPet(uid)
-    if not uid or uid == "" then return false, "no uid" end
-    CharacterRE:FireServer("Focus", uid) task.wait(0.1)
-    local ok, err = pcall(function() PetRE:FireServer("Sell", uid) end)
-    CharacterRE:FireServer("Focus")
-    return ok, err
-end
-
---=========== Grid / Area helpers ===========
-local function eggArea(eggInst)
-    if not eggInst then return "Any" end
-    local di = eggInst:FindFirstChild("DI")
-    if not di then return "Any" end
-    return _areaFromXZ(di:GetAttribute("X") or 0, di:GetAttribute("Z") or 0)
-end
-
-local function petArea(uid)
-    if not uid or uid == "" then return "Any" end
-    local petNode = OwnedPetData:FindFirstChild(uid)
-    if petNode then
-        local di = petNode:FindFirstChild("DI")
-        if di then return _areaFromXZ(di:GetAttribute("X") or 0, di:GetAttribute("Z") or 0) end
+-- Occupancy check (ใช้ OCC ก่อน, ตกเหลือค่อย proximity)
+local function isFarmTileOccupied(farmPart, minDistance)
+    local ic = farmPart:GetAttribute("IslandCoord")
+    if ic then
+        local k = _keyXZ(ic.X, ic.Z)
+        if OCC.byKey[k] then return true end
     end
-    local P = OwnedPets[uid]; local gc = P and P.GridCoord
-    if gc then return _areaFromXZ(gc.X or 0, gc.Z or 0) end
-    return "Any"
-end
-
-local function _cloneFoodMap(t)
-    local m = {}
-    if type(t) == "table" then
-        if rawget(t, 1) ~= nil then
-            for _, v in ipairs(t) do m[tostring(v)] = true end
-        else
-            for k, v in pairs(t) do if v then m[tostring(k)] = true end end
-        end
-    end
-    return m
-end
-
-local function pickFoodPerPet(uid, invAttrs)
-    local per = Configuration.Pet.AutoFeed_PetFoods and Configuration.Pet.AutoFeed_PetFoods[uid]
-    if type(per) ~= "table" then return nil end
-    local allow = {}
-    if rawget(per, 1) ~= nil then
-        for _, v in ipairs(per) do allow[tostring(v)] = true end
-    else
-        for k, on in pairs(per) do if on then allow[tostring(k)] = true end end
-    end
-    for _, name in ipairs(PetFoods_InGame) do
-        local have = tonumber(invAttrs[name] or 0) or 0
-        if allow[name] and have > 0 then return name end
-    end
-    return nil
+    return IsOccupiedAtPosition(farmPart.Position, (minDistance or 4) + 0.1)
 end
 
 --==============================================================
@@ -302,22 +299,14 @@ end))
 table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildAdded:Connect(function(egg)
     task.wait(0.1); local eggUID = tostring(egg) or "None"
     if egg then
-        Egg_Belt[eggUID] = {
-            UID = eggUID,
-            Mutate = (egg:GetAttribute("M") or "None"),
-            Type = (egg:GetAttribute("T") or "BasicEgg")
-        }
+        Egg_Belt[eggUID] = { UID = eggUID, Mutate = (egg:GetAttribute("M") or "None"), Type = (egg:GetAttribute("T") or "BasicEgg") }
     end
 end))
 for _,egg in pairs(Egg_Belt_Folder:GetChildren()) do
     task.spawn(pcall,function()
         local eggUID = tostring(egg) or "None"
         if egg then
-            Egg_Belt[eggUID] = {
-                UID = eggUID,
-                Mutate = (egg:GetAttribute("M") or "None"),
-                Type = (egg:GetAttribute("T") or "BasicEgg")
-            }
+            Egg_Belt[eggUID] = { UID = eggUID, Mutate = (egg:GetAttribute("M") or "None"), Type = (egg:GetAttribute("T") or "BasicEgg") }
         end
     end)
 end
@@ -328,7 +317,7 @@ table.insert(EnvirontmentConnections,Pet_Folder.ChildRemoved:Connect(function(pe
     if pet and OwnedPets[petUID] then OwnedPets[petUID] = nil end
 end))
 
--- ===== SAFE pet reader (ใช้ทั้ง ChildAdded และ preload) =====
+-- ===== SAFE pet reader =====
 local function _buildOwnedPetEntry(pet, petUID)
     local IsOwned = pet:GetAttribute("UserId") == PlayerUserID
     if not IsOwned then return end
@@ -344,8 +333,7 @@ local function _buildOwnedPetEntry(pet, petUID)
         _cashTxtRef = txt
         return txt
     end
-    local diNode = OwnedPetData:FindFirstChild(petUID)
-    diNode = diNode and diNode:FindFirstChild("DI")
+    local diNode = OwnedPetData:FindFirstChild(petUID); diNode = diNode and diNode:FindFirstChild("DI")
     local GridCoord = diNode and Vector3.new(diNode:GetAttribute("X"), diNode:GetAttribute("Y"), diNode:GetAttribute("Z")) or nil
 
     OwnedPets[petUID] = setmetatable({
@@ -372,21 +360,12 @@ local function _buildOwnedPetEntry(pet, petUID)
         end
     })
 end
-
 table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(function(pet)
-    task.delay(0.1, function()
-        local uid = tostring(pet)
-        if pet and uid then _buildOwnedPetEntry(pet, uid) end
-    end)
+    task.delay(0.1, function() local uid = tostring(pet); if pet and uid then _buildOwnedPetEntry(pet, uid) end end)
 end))
-
 for _,pet in pairs(Pet_Folder:GetChildren()) do
-    task.spawn(function()
-        local uid = tostring(pet)
-        if pet and uid then _buildOwnedPetEntry(pet, uid) end
-    end)
+    task.spawn(function() local uid = tostring(pet); if pet and uid then _buildOwnedPetEntry(pet, uid) end end)
 end
-
 
 --==============================================================
 --                      CONFIG / UI
@@ -453,23 +432,16 @@ local function _pick_fps_setter()
         (setfpscap),
         (set_fps_cap),
     }
-    for _,fn in ipairs(cands) do
-        if type(fn) == "function" then return fn end
-    end
+    for _,fn in ipairs(cands) do if type(fn) == "function" then return fn end end
     return nil
 end
 local _setFPSCap = _pick_fps_setter()
 
 local G2 = getgenv()
 G2.MEOWY_FPS = G2.MEOWY_FPS or { locked = false, cap = 60 }
-local function _notify(t, m)
-    pcall(function() Fluent:Notify({ Title = t, Content = m, Duration = 5 }) end)
-    print("[Perf] "..t..": "..m)
-end
+local function _notify(t, m) pcall(function() Fluent:Notify({ Title = t, Content = m, Duration = 5 }) end); print("[Perf] "..t..": "..m) end
 local function ApplyFPSLock()
-    if not _setFPSCap then
-        _notify("FPS", "Executor ไม่รองรับ setfpscap"); return
-    end
+    if not _setFPSCap then _notify("FPS", "Executor ไม่รองรับ setfpscap"); return end
     if Configuration.Perf.FPSLock then
         local cap = math.max(5, math.floor(tonumber(Configuration.Perf.FPSValue) or 60))
         G2.MEOWY_FPS.locked = true; G2.MEOWY_FPS.cap = cap
@@ -480,7 +452,7 @@ local function ApplyFPSLock()
     end
 end
 
---== Hide caches
+--== Hide caches & toggles (เหมือนเดิม)
 local _partPrev, _particlePrev, _togglePrev, _uiPrev =
     setmetatable({}, { __mode="k" }),
     setmetatable({}, { __mode="k" }),
@@ -501,8 +473,7 @@ end
 local function _applyModelVisible(model, visible)
     for _,d in ipairs(model:GetDescendants()) do
         if d:IsA("BasePart") then
-            _setPartVisible(d, visible)
-            d.CastShadow = visible and d.CastShadow or false
+            _setPartVisible(d, visible); d.CastShadow = visible and d.CastShadow or false
         elseif d:IsA("BillboardGui") or d:IsA("SurfaceGui") then
             if _togglePrev[d] == nil then _togglePrev[d] = d.Enabled end
             d.Enabled = visible and (_togglePrev[d] ~= false)
@@ -530,25 +501,17 @@ end
 local function _applyEffectInst(inst, enable)
     if inst:IsA("ParticleEmitter") then
         if enable then
-            local prev = _particlePrev[inst]
-            if prev ~= nil then inst.Rate = prev; _particlePrev[inst] = nil
-            else inst.Rate = inst.Rate end
+            local prev = _particlePrev[inst]; if prev ~= nil then inst.Rate = prev; _particlePrev[inst] = nil end
         else
             if _particlePrev[inst] == nil then _particlePrev[inst] = inst.Rate end
             inst.Rate = 0
         end
     elseif inst:IsA("Beam") or inst:IsA("Trail") or inst:IsA("Highlight") then
-        if enable then
-            if _togglePrev[inst] ~= nil then inst.Enabled = _togglePrev[inst]; _togglePrev[inst] = nil end
-        else
-            if _togglePrev[inst] == nil then _togglePrev[inst] = inst.Enabled end
-            inst.Enabled = false
-        end
-    elseif inst:IsA("Explosion") then
-        pcall(function() inst.Visible = enable end)
+        if enable then if _togglePrev[inst] ~= nil then inst.Enabled = _togglePrev[inst]; _togglePrev[inst] = nil end
+        else if _togglePrev[inst] == nil then _togglePrev[inst] = inst.Enabled end; inst.Enabled = false end
+    elseif inst:IsA("Explosion") then pcall(function() inst.Visible = enable end)
     end
 end
-
 local function ApplyHideEffects(on)
     for _,d in ipairs(workspace:GetDescendants()) do _applyEffectInst(d, not on) end
     if _effectsConn then _effectsConn:Disconnect(); _effectsConn = nil end
@@ -618,16 +581,9 @@ local function _waitAlive(tok, sec)
     return tok.alive
 end
 
-
-
 ----------------------------------------------------------------
 -- ============ AUTOPLACE CORE (Filters + Place) ===============
 ----------------------------------------------------------------
-
--- ====================================================================
---      VVV Auto Place Helpers (เวอร์ชันปรับปรุงและเข้ากันได้) VVV
--- ====================================================================
-
 local CollectionService = game:GetService("CollectionService")
 
 local function getIslandNumberFromName(islandName)
@@ -639,70 +595,11 @@ local function getIslandNumberFromName(islandName)
     return nil
 end
 
-local function getFarmParts(islandNumber)
-    if not islandNumber then return {} end
-    local art = workspace:FindFirstChild("Art")
-    if not art then return {} end
-    local islandName = "Island_" .. tostring(islandNumber)
-    local island = art:FindFirstChild(islandName)
-    if not island then
-        for _, child in ipairs(art:GetChildren()) do
-            if child.Name:match("^Island[_-]?" .. tostring(islandNumber) .. "$") then
-                island = child
-                break
-            end
-        end
-        if not island then return {} end
-    end
-
-    local farmParts, unlockedFarmParts = {}, {}
-    local function scanForFarmParts(parent)
-        for _, child in ipairs(parent:GetChildren()) do
-            if child:IsA("BasePart") and child.Name:match("^Farm_split_") then
-                table.insert(farmParts, child)
-            end
-            if #child:GetChildren() > 0 then scanForFarmParts(child) end
-        end
-    end
-    scanForFarmParts(island)
-
-    local locksFolder = island:FindFirstChild("ENV") and island:FindFirstChild("ENV"):FindFirstChild("Locks")
-    if not locksFolder then return farmParts end
-
-    local lockedAreas = {}
-    for _, lockModel in ipairs(locksFolder:GetChildren()) do
-        local farmPart = lockModel:FindFirstChild("Farm")
-        if farmPart and farmPart:IsA("BasePart") and farmPart.Transparency == 0 then
-            table.insert(lockedAreas, { cframe = farmPart.CFrame, size = farmPart.Size })
-        end
-    end
-
-    for _, farmPart in ipairs(farmParts) do
-        local isLocked = false
-        local farmPartPos = farmPart.Position
-        for _, lockArea in ipairs(lockedAreas) do
-            local relativePos = lockArea.cframe:PointToObjectSpace(farmPartPos)
-            if math.abs(relativePos.X) <= lockArea.size.X / 2 and math.abs(relativePos.Z) <= lockArea.size.Z / 2 then
-                isLocked = true
-                break
-            end
-        end
-        if not isLocked then
-            table.insert(unlockedFarmParts, farmPart)
-        end
-    end
-    return unlockedFarmParts
-end
-
 local function isEggLikeModel(model)
     if not model or not model:IsA("Model") then return false end
-    -- ไข่ที่ถูกวางใน BlockFolder มักมี RemoteFunction "RF" ใต้ RootPart/PrimaryPart
     if model:FindFirstChild("RF", true) then return true end
-    -- ชื่อโมเดลตรงกับ UID ของไข่ใน OwnedEggData (กรณีเกมตั้งชื่อโมเดลเป็น UID)
     if OwnedEggData:FindFirstChild(model.Name) then return true end
-    -- บางเกมตั้งแอตทริบิวต์ชนิดไข่ไว้ที่โมเดล/พาร์ท
     if model:GetAttribute("T") and not model:FindFirstChildOfClass("Humanoid") then return true end
-    -- กันพลาดด้วยการดูคีย์เวิร์ด
     local n = string.lower(model.Name or "")
     if n:find("egg") or n:find("hatch") then return true end
     return false
@@ -719,79 +616,54 @@ local function isPetLikeModel(model)
     return false
 end
 
--- ==== REPLACE: ตรวจสอบว่า “แปลง” ว่างจริง (ไม่มีสัตว์และไม่มีไข่) ====
-local function isFarmTileOccupied(farmPart, minDistance)
-    local center = farmPart.Position
-    return IsOccupiedAtPosition(center, (minDistance or 4) + 0.1)
-end
-
-
 local function getPlayerRootPosition()
     return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") and Player.Character.HumanoidRootPart.Position
 end
 
 local function findAvailableFarmPartNearPosition(farmParts, minDistance, targetPosition)
     if not farmParts or #farmParts == 0 then return nil end
-
-    -- ถ้าไม่ระบุตำแหน่ง: หาช่องว่างอันแรกพอ
     if not targetPosition then
         for _, part in ipairs(farmParts) do
-            if not isFarmTileOccupied(part, minDistance) then
-                return part
-            end
+            if not isFarmTileOccupied(part, minDistance) then return part end
         end
         return nil
     end
-
-    -- มีตำแหน่งเป้าหมาย: เลือกช่องว่างที่ "ใกล้สุด"
     local best, bestDist = nil, math.huge
     for _, part in ipairs(farmParts) do
         if not isFarmTileOccupied(part, minDistance) then
             local d = (part.Position - targetPosition).Magnitude
-            if d < bestDist then
-                best, bestDist = part, d
-            end
+            if d < bestDist then best, bestDist = part, d end
         end
     end
     return best
 end
 
-
--- (Helper) ดึง UID ของไข่ทั้งหมดที่ยังไม่ได้วาง
 local function getUnplacedEggUIDs()
     local uids = {}
     for _, eggNode in ipairs(OwnedEggData:GetChildren()) do
-        if not eggNode:FindFirstChild("DI") then
-            table.insert(uids, eggNode.Name)
-        end
+        if not eggNode:FindFirstChild("DI") then table.insert(uids, eggNode.Name) end
     end
     return uids
 end
 
--- (Helper) ดึง UID ของสัตว์เลี้ยงทั้งหมดที่ยังไม่ได้วาง (เวอร์ชันแก้ไข: เช็คจาก workspace โดยตรง)
 local function getUnplacedPetUIDs()
     local uids = {}
-    local petsInWorkspace = workspace:FindFirstChild("Pets")
-    if not petsInWorkspace then
-        warn("Could not find 'Pets' folder in workspace!")
-        return uids 
-    end
-
-    -- วนลูปสัตว์เลี้ยงทั้งหมดที่เรามีในข้อมูล
+    local petsInWorkspace = workspace:FindFirstChild("Pets"); if not petsInWorkspace then return uids end
     for _, petNode in ipairs(OwnedPetData:GetChildren()) do
-        -- เช็คว่าใน workspace ไม่มีโมเดลของสัตว์ตัวนี้อยู่
-        if not petsInWorkspace:FindFirstChild(petNode.Name) then
-            -- ถ้าไม่เจอใน workspace แปลว่ายังไม่ได้วาง
-            table.insert(uids, petNode.Name)
-        end
+        if not petsInWorkspace:FindFirstChild(petNode.Name) then table.insert(uids, petNode.Name) end
     end
     return uids
 end
 
--- (Helper) ฟังก์ชันสำหรับคำนวณรายได้ของสัตว์ที่อยู่ใน Inventory
--- (Helper) ฟังก์ชันสำหรับคำนวณรายได้ของสัตว์ที่อยู่ใน Inventory (เวอร์ชันใหม่ที่แม่นยำกว่า)
+-- ==== Income cache (OP) ====
+local _INV_CACHE = { v = {}, t = {} }
+local _INV_TTL = 15
 function GetInventoryIncomePerSecByUID(uid)
     if not uid or uid == "" then return 0 end
+    local now = os.clock()
+    local last = _INV_CACHE.t[uid] or 0
+    if now - last < _INV_TTL then return _INV_CACHE.v[uid] or 0 end
+
     local pg = Player:FindFirstChild("PlayerGui"); if not pg then return 0 end
     local screenStorage = pg:FindFirstChild("ScreenStorage"); if not screenStorage then return 0 end
     local frame = screenStorage:FindFirstChild("Frame"); if not frame then return 0 end
@@ -799,79 +671,64 @@ function GetInventoryIncomePerSecByUID(uid)
     local scrolling = contentPet:FindFirstChild("ScrollingFrame"); if not scrolling then return 0 end
 
     local item = scrolling:FindFirstChild(uid)
-    if not item then
-        for _, ch in ipairs(scrolling:GetChildren()) do
-            if ch.Name == uid then item = ch break end
-        end
-    end
-    if not item then return 0 end
+    if not item then for _, ch in ipairs(scrolling:GetChildren()) do if ch.Name == uid then item = ch break end end end
+    if not item then _INV_CACHE.t[uid] = now; _INV_CACHE.v[uid] = 0; return 0 end
 
     local btn  = item:FindFirstChild("BTN") or item:FindFirstChildWhichIsA("Frame")
-    if not btn then return 0 end
+    if not btn then _INV_CACHE.t[uid] = now; _INV_CACHE.v[uid] = 0; return 0 end
     local stat = btn:FindFirstChild("Stat") or btn:FindFirstChildWhichIsA("Frame")
-    if not stat then return 0 end
+    if not stat then _INV_CACHE.t[uid] = now; _INV_CACHE.v[uid] = 0; return 0 end
     local price = stat:FindFirstChild("Price") or stat:FindFirstChildWhichIsA("Frame")
-    if not price then return 0 end
+    if not price then _INV_CACHE.t[uid] = now; _INV_CACHE.v[uid] = 0; return 0 end
 
+    local val = 0
     local valueObj = price:FindFirstChild("Value")
     if valueObj then
         if valueObj:IsA("NumberValue") or valueObj:IsA("IntValue") then
-            return tonumber(valueObj.Value) or 0
+            val = tonumber(valueObj.Value) or 0
         elseif valueObj:IsA("StringValue") then
-            local s = tostring(valueObj.Value or "")
-            local n = tonumber((s:gsub("[^%d%.]", "")))
-            return n or 0
+            local s = tostring(valueObj.Value or ""); val = tonumber((s:gsub("[^%d%.]", ""))) or 0
         end
     end
-
-    local function readText(inst)
+    local function readNumberFrom(inst)
         local ok, txt = pcall(function() return inst.Text end)
         if ok and txt then
-            local n = tonumber((tostring(txt):gsub("[^%d%.]", "")))
-            if n then return n end
+            local n = tonumber((tostring(txt):gsub("[^%d%.]",""))); if n then return n end
         end
         return nil
     end
-    local n = readText(price); if n then return n end
-    local textLike = price:FindFirstChildWhichIsA("TextLabel") or price:FindFirstChildWhichIsA("TextButton")
-    if textLike then n = readText(textLike); if n then return n end end
-    for _, d in ipairs(price:GetDescendants()) do
-        if d:IsA("TextLabel") or d:IsA("TextButton") then
-            n = readText(d); if n then return n end
+    if val == 0 then
+        local textLike = price:FindFirstChildWhichIsA("TextLabel") or price:FindFirstChildWhichIsA("TextButton")
+        if textLike then val = readNumberFrom(textLike) or 0 end
+        if val == 0 then
+            for _, d in ipairs(price:GetDescendants()) do
+                if d:IsA("TextLabel") or d:IsA("TextButton") then val = readNumberFrom(d) or 0; if val > 0 then break end end
+            end
         end
     end
-    return 0
+    _INV_CACHE.t[uid] = now; _INV_CACHE.v[uid] = val
+    return val
 end
 
-
--- (Core) กรองรายการไข่ตามเงื่อนไขใน Config
+-- (Core) filters
 local function filterEggs(eggUIDs)
     local filtered = {}
     local types = Configuration.Egg.Types or {}
     local mutations = Configuration.Egg.Mutations or {}
-
     for _, uid in ipairs(eggUIDs) do
         local eggNode = OwnedEggData:FindFirstChild(uid)
         if eggNode then
             local eggType = eggNode:GetAttribute("T") or "BasicEgg"
             local eggMuta = eggNode:GetAttribute("M") or "None"
-            if types[eggType] and mutations[eggMuta] then
-                table.insert(filtered, uid)
-            end
+            if types[eggType] and mutations[eggMuta] then table.insert(filtered, uid) end
         end
     end
     return filtered
 end
-
--- (Core) กรองรายการสัตว์ตามเงื่อนไขใน Config
 local function filterPets(petUIDs)
     local filtered = {}
     local mode = Configuration.Pet.PlacePet_Mode or "All"
-
-    if mode == "All" then
-        return petUIDs
-    end
-
+    if mode == "All" then return petUIDs end
     for _, uid in ipairs(petUIDs) do
         local petNode = OwnedPetData:FindFirstChild(uid)
         if petNode then
@@ -885,135 +742,27 @@ local function filterPets(petUIDs)
                 local income = GetInventoryIncomePerSecByUID(uid)
                 local minInc = Configuration.Pet.PlacePet_Between.Min or 0
                 local maxInc = Configuration.Pet.PlacePet_Between.Max or math.huge
-                if income >= minInc and income <= maxInc then
-                    table.insert(filtered, uid)
-                end
+                if income >= minInc and income <= maxInc then table.insert(filtered, uid) end
             end
         end
     end
     return filtered
 end
 
--- (Core) ส่ง Remote Event เพื่อวางไอเทม (เวอร์ชันอัปเดต: เรียกใช้ ensureNear แบบใหม่)
+-- placeItem (ใช้อัตโนมัติวาร์ปแบบฉลาด)
 local function placeItem(uid, tilePart)
     if not uid or not tilePart then return false end
-    
     local dst = tilePart.Position
-
-    -- แก้ไขตรงนี้: เรียกใช้ ensureNear โดยไม่ต้องระบุระยะทางอีกต่อไป
-    ensureNear(dst) 
-
-    CharacterRE:FireServer("Focus", uid)
-    task.wait(0.5)
-
-    dprint("Attempting to place", uid, "at world position", dst)
-    local args = { "Place", { DST = Vector3.new(dst.X, dst.Y, dst.Z), ID = uid } }
-    CharacterRE:FireServer(unpack(args))
+    ensureNear(dst)
+    CharacterRE:FireServer("Focus", uid); task.wait(0.5)
+    dprint("Attempting to place", uid, "at", dst)
+    CharacterRE:FireServer("Place", { DST = Vector3.new(dst.X, dst.Y, dst.Z), ID = uid })
     task.wait(0.2)
-
-    CharacterRE:FireServer("Focus") 
-    
+    CharacterRE:FireServer("Focus")
     return true
 end
-----------------------------------------------------------------
--- ============ AUTOPLACE RUNNERS (เวอร์ชันแก้ไข: จัดการพื้นที่ที่ล้มเหลว) ==============
 
-local function runAutoPlaceEgg(tok)
-    while tok.alive do
-        local uidsToPlace = getUnplacedEggUIDs()
-        local filteredUIDs = filterEggs(uidsToPlace)
-
-        if #filteredUIDs > 0 then
-            local islandNum = getIslandNumberFromName(IslandName)
-            -- ดึงรายการพื้นที่ทั้งหมด และเราจะลบพื้นที่ที่ใช้แล้ว/ล้มเหลวออกจากลิสต์นี้
-            local availableFarmParts = getFarmParts(islandNum)
-            
-            for _, uid in ipairs(filteredUIDs) do
-                if not tok.alive or #availableFarmParts == 0 then break end
-
-                local partToTry = findAvailableFarmPartNearPosition(availableFarmParts, 4, getPlayerRootPosition())
-
-                if partToTry then
-                    placeItem(uid, partToTry)
-                    
-                    -- ไม่ว่าจะสำเร็จหรือไม่ เราจะลบ Part นี้ออกจากลิสต์ที่จะใช้ในรอบนี้
-                    -- เพื่อป้องกันการใช้ซ้ำหรือติดลูปที่ตำแหน่งเดิม
-                    local partIndex = table.find(availableFarmParts, partToTry)
-                    if partIndex then
-                        table.remove(availableFarmParts, partIndex)
-                    end
-
-                    dprint("Waiting for egg data confirmation for:", uid)
-                    local eggNode = OwnedEggData:FindFirstChild(uid)
-                    if eggNode then
-                        local di = eggNode:WaitForChild("DI", 2)
-                        if not di then
-                             dprint("Confirmation failed for egg:", uid)
-                        end
-                    end
-                    task.wait(0.2)
-                else
-                    dprint("AutoPlaceEgg: No more available parts found.")
-                    break
-                end
-            end
-        end
-
-        if not _waitAlive(tok, tonumber(Configuration.Egg.AutoPlaceEgg_Delay) or 1) then break end
-    end
-end
-
-local function runAutoPlacePet(tok)
-    while tok.alive do
-        local uidsToPlace = getUnplacedPetUIDs()
-        local filteredUIDs = filterPets(uidsToPlace)
-
-        if #filteredUIDs > 1 then
-            table.sort(filteredUIDs, function(uid_a, uid_b)
-                return (GetInventoryIncomePerSecByUID(uid_a) or 0) > (GetInventoryIncomePerSecByUID(uid_b) or 0)
-            end)
-        end
-
-        if #filteredUIDs > 0 then
-            local islandNum = getIslandNumberFromName(IslandName)
-            -- ดึงรายการพื้นที่ทั้งหมด และเราจะลบพื้นที่ที่ใช้แล้ว/ล้มเหลวออกจากลิสต์นี้
-            local availableFarmParts = getFarmParts(islandNum)
-
-            for _, uid in ipairs(filteredUIDs) do
-                if not tok.alive or #availableFarmParts == 0 then break end
-
-                local partToTry = findAvailableFarmPartNearPosition(availableFarmParts, 4, getPlayerRootPosition())
-
-                if partToTry then
-                    placeItem(uid, partToTry)
-                    local partIndex = table.find(availableFarmParts, partToTry)
-                    if partIndex then
-                        table.remove(availableFarmParts, partIndex)
-                    end
-
-                    dprint("Waiting for pet model confirmation for:", uid)
-                    local petModel = Pet_Folder:WaitForChild(uid, 3)
-                    if not petModel then
-                        dprint("Confirmation failed for pet:", uid)
-                    else
-                        dprint("Successfully placed and confirmed pet:", uid)
-                    end
-                    task.wait(0.2)
-                else
-                    dprint("AutoPlacePet: No more available parts found.")
-                    break
-                end
-            end
-        end
-
-        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
-    end
-end
-
-
---==============================================================
---                    RUNNERS
---==============================================================
+--============================== RUNNERS (บางส่วน) ==============================
 local function runAntiAFK(tok)
     local VirtualUser = game:GetService("VirtualUser")
     while tok.alive do
@@ -1030,13 +779,34 @@ local function runAutoCollect(tok)
             if not tok.alive then break end
             local RE = pet and pet.RE
             if RE then
-                RE:FireServer("Claim")
-                claimed += 1
+                RE:FireServer("Claim"); claimed += 1
                 if claimed % 10 == 0 then task.wait() end
             end
         end
         if not _waitAlive(tok, tonumber(Configuration.Main.Collect_Delay) or 3) then break end
     end
+end
+
+-- === Feed helper ===
+local function _cloneFoodMap(t)
+    local m = {}
+    if type(t) == "table" then
+        if rawget(t, 1) ~= nil then for _, v in ipairs(t) do m[tostring(v)] = true end
+        else for k, v in pairs(t) do if v then m[tostring(k)] = true end end end
+    end
+    return m
+end
+local function pickFoodPerPet(uid, invAttrs)
+    local per = Configuration.Pet.AutoFeed_PetFoods and Configuration.Pet.AutoFeed_PetFoods[uid]
+    if type(per) ~= "table" then return nil end
+    local allow = {}
+    if rawget(per, 1) ~= nil then for _, v in ipairs(per) do allow[tostring(v)] = true end
+    else for k, on in pairs(per) do if on then allow[tostring(k)] = true end end end
+    for _, name in ipairs(PetFoods_InGame) do
+        local have = tonumber(invAttrs[name] or 0) or 0
+        if allow[name] and have > 0 then return name end
+    end
+    return nil
 end
 
 local function runAutoFeed(tok)
@@ -1060,6 +830,25 @@ local function runAutoFeed(tok)
         end
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoFeed_Delay) or 10) then break end
     end
+end
+
+local function petArea(uid)
+    if not uid or uid == "" then return "Any" end
+    local petNode = OwnedPetData:FindFirstChild(uid)
+    if petNode then
+        local di = petNode:FindFirstChild("DI")
+        if di then return _areaFromXZ(di:GetAttribute("X") or 0, di:GetAttribute("Z") or 0) end
+    end
+    local P = OwnedPets[uid]; local gc = P and P.GridCoord
+    if gc then return _areaFromXZ(gc.X or 0, gc.Z or 0) end
+    return "Any"
+end
+
+local function eggArea(eggInst)
+    if not eggInst then return "Any" end
+    local di = eggInst:FindFirstChild("DI")
+    if not di then return "Any" end
+    return _areaFromXZ(di:GetAttribute("X") or 0, di:GetAttribute("Z") or 0)
 end
 
 local function runAutoCollectPet(tok)
@@ -1113,96 +902,88 @@ local function runAutoCollectPet(tok)
     end
 end
 
-
-
-
-local function runAutoHatch(tok)
+-- ===== AutoPlace (ใช้ GetFreeFarmParts + OCC lock ทันที) =====
+local function runAutoPlaceEgg(tok)
     while tok.alive do
-        local wantArea = Configuration.Egg.HatchArea or "Any"
-        for _,egg in pairs(OwnedEggData:GetChildren()) do
-            if not tok.alive then break end
-            local di = egg:FindFirstChild("DI")
-            local hatchable = di and egg:GetAttribute("D") and (ServerTime.Value >= egg:GetAttribute("D"))
-            if hatchable then
-                local a = eggArea(egg)
-                if (wantArea == "Any") or (a == wantArea) then
-                    local EggModel = BlockFolder:FindFirstChild(egg.Name)
-                    local RootPart = EggModel and (EggModel.PrimaryPart or EggModel:FindFirstChild("RootPart"))
-                    local RF = RootPart and RootPart:FindFirstChild("RF")
-                    if RF then task.spawn(function() RF:InvokeServer("Hatch") end) end
+        local uidsToPlace = getUnplacedEggUIDs()
+        local filteredUIDs = filterEggs(uidsToPlace)
+
+        if #filteredUIDs > 0 then
+            local area = Configuration.Egg.PlaceArea or "Any"
+            local availableFarmParts = GetFreeFarmParts(area)
+
+            for _, uid in ipairs(filteredUIDs) do
+                if not tok.alive or #availableFarmParts == 0 then break end
+                local partToTry = findAvailableFarmPartNearPosition(availableFarmParts, 4, getPlayerRootPosition())
+                if partToTry then
+                    local ic = partToTry:GetAttribute("IslandCoord")
+                    local lockKey = ic and _keyXZ(ic.X, ic.Z)
+                    if lockKey then OCC.byKey[lockKey] = true end
+                    placeItem(uid, partToTry)
+
+                    local idx = table.find(availableFarmParts, partToTry)
+                    if idx then table.remove(availableFarmParts, idx) end
+
+                    dprint("Waiting for egg data confirmation for:", uid)
+                    local eggNode = OwnedEggData:FindFirstChild(uid)
+                    local ok = false
+                    if eggNode then ok = eggNode:WaitForChild("DI", 2) ~= nil end
+                    if not ok and lockKey then OCC.byKey[lockKey] = nil end
+                    task.wait(0.2)
+                else
+                    dprint("AutoPlaceEgg: No more available parts found.")
+                    break
                 end
             end
         end
-        if not _waitAlive(tok, tonumber(Configuration.Egg.Hatch_Delay) or 15) then break end
+
+        if not _waitAlive(tok, tonumber(Configuration.Egg.AutoPlaceEgg_Delay) or 1) then break end
     end
 end
 
-local function runAutoClaim(tok)
-    local Tasks; local EventRE = ResEvent and GameRemoteEvents:WaitForChild(tostring(ResEvent).."RE")
-    if EventTaskData then Tasks = EventTaskData:WaitForChild("Tasks") end
+local function runAutoPlacePet(tok)
     while tok.alive do
-        if Tasks and EventRE then
-            for _,Quest in pairs(Tasks:GetChildren()) do
-                if not tok.alive then break end
-                EventRE:FireServer({event = "claimreward",id = Quest:GetAttribute("Id")})
-            end
+        local uidsToPlace = getUnplacedPetUIDs()
+        local filteredUIDs = filterPets(uidsToPlace)
+
+        if #filteredUIDs > 1 then
+            table.sort(filteredUIDs, function(a,b)
+                return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
+            end)
         end
-        if not _waitAlive(tok, tonumber(Configuration.Event.AutoClaim_Delay) or 3) then break end
-    end
-end
 
-local function runAutoBuyEgg(tok)
-    local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
-    local function currentCoin()
-        local asset = InventoryData or Data:FindFirstChild("Asset")
-        if not asset then return 0 end
-        return tonumber(asset:GetAttribute("Coin") or 0) or 0
-    end
-    while tok.alive do
-        local coinOk = (not Configuration.Egg.CheckMinCoin)
-            or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0))
-        if coinOk then
-            for _,egg in pairs(Egg_Belt) do
-                if not tok.alive then break end
-                local EggType = egg.Type
-                local EggMutation = egg.Mutate
-                if (Configuration.Egg.Types[EggType]) and (Configuration.Egg.Mutations[EggMutation]) then
-                    if RE then RE:FireServer("BuyEgg", egg.UID) end
+        if #filteredUIDs > 0 then
+            local area = Configuration.Pet.PlaceArea or "Any"
+            local availableFarmParts = GetFreeFarmParts(area)
+
+            for _, uid in ipairs(filteredUIDs) do
+                if not tok.alive or #availableFarmParts == 0 then break end
+                local partToTry = findAvailableFarmPartNearPosition(availableFarmParts, 4, getPlayerRootPosition())
+                if partToTry then
+                    local ic = partToTry:GetAttribute("IslandCoord")
+                    local lockKey = ic and _keyXZ(ic.X, ic.Z)
+                    if lockKey then OCC.byKey[lockKey] = true end
+                    placeItem(uid, partToTry)
+
+                    local idx = table.find(availableFarmParts, partToTry)
+                    if idx then table.remove(availableFarmParts, idx) end
+
+                    dprint("Waiting for pet model confirmation for:", uid)
+                    local petModel = Pet_Folder:WaitForChild(uid, 3)
+                    if not petModel and lockKey then OCC.byKey[lockKey] = nil else dprint("Placed:", uid) end
+                    task.wait(0.2)
+                else
+                    dprint("AutoPlacePet: No more available parts found.")
+                    break
                 end
             end
         end
-        if not _waitAlive(tok, tonumber(Configuration.Egg.AutoBuyEgg_Delay) or 1) then break end
+
+        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
 
-
-
-local function runAutoBuyFood(tok)
-    local FoodList = Data:WaitForChild("FoodStore",30):WaitForChild("LST",30)
-    local RE = GameRemoteEvents:WaitForChild("FoodStoreRE")
-    while tok.alive do
-        for foodName,stockAmount in pairs(FoodList:GetAttributes()) do
-            if not tok.alive then break end
-            if stockAmount > 0 and Configuration.Shop.Food.Foods[foodName] then
-                if RE then RE:FireServer(foodName) end
-            end
-        end
-        if not _waitAlive(tok, tonumber(Configuration.Shop.Food.AutoBuy_Delay) or 1) then break end
-    end
-end
-
-local function runAutoLottery(tok)
-    local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE",30)
-    while tok.alive do
-        local args = { event = "lottery", count = 1 }
-        LotteryRE:FireServer(args)
-        if not _waitAlive(tok, tonumber(Configuration.Event.AutoLottery_Delay) or 60) then break end
-    end
-end
-
---==============================================================
---                      UI (unchanged except notes)
---==============================================================
+--============================== UI ==============================
 local Window = Fluent:CreateWindow({
     Title = GameName, SubTitle = "by DemiGodz", TabWidth = 160,
     Size = UDim2.fromOffset(522, 414), Acrylic = true, Theme = "Dark",
@@ -1264,11 +1045,7 @@ Tabs.Pet:AddToggle("Auto Collect Pet",{ Title="Auto Collect Pet", Default=false,
 end })
 Tabs.Pet:AddToggle("Auto Place Pet",{ Title="Auto Place Pet", Default=false, Callback=function(v)
     Configuration.Pet.AutoPlacePet = v
-    if v then
-        TaskMgr.start("AutoPlacePet", runAutoPlacePet)
-    else
-        TaskMgr.stop("AutoPlacePet")
-    end
+    if v then TaskMgr.start("AutoPlacePet", runAutoPlacePet) else TaskMgr.stop("AutoPlacePet") end
 end })
 
 Tabs.Pet:AddButton({
@@ -1281,32 +1058,21 @@ Tabs.Pet:AddButton({
                 { Title = "Yes", Callback = function()
                     local CollectType = Configuration.Pet.CollectPet_Type
                     local areaWant = Configuration.Pet.CollectPet_Area
-                    local function passArea(uid)
-                        if areaWant == "Any" then return true end
-                        return petArea(uid) == areaWant
-                    end
-
+                    local function passArea(uid) if areaWant == "Any" then return true end return petArea(uid) == areaWant end
                     if CollectType == "All" then
                         for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID) then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
-                            end
+                            if PetData and not PetData.IsBig and passArea(UID) then if PetData.RE then PetData.RE:FireServer("Claim") end; CharacterRE:FireServer("Del", UID) end
                         end
                     elseif CollectType == "Match Pet" then
                         for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID)
-                               and Configuration.Pet.CollectPet_Pets[PetData.Type] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
+                            if PetData and not PetData.IsBig and passArea(UID) and Configuration.Pet.CollectPet_Pets[PetData.Type] then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end; CharacterRE:FireServer("Del", UID)
                             end
                         end
                     elseif CollectType == "Match Mutation" then
                         for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID)
-                               and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
+                            if PetData and not PetData.IsBig and passArea(UID) and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end; CharacterRE:FireServer("Del", UID)
                             end
                         end
                     elseif CollectType == "Match Pet&Mutation" then
@@ -1314,8 +1080,7 @@ Tabs.Pet:AddButton({
                             if PetData and not PetData.IsBig and passArea(UID)
                                and Configuration.Pet.CollectPet_Pets[PetData.Type]
                                and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
+                                if PetData.RE then PetData.RE:FireServer("Claim") end; CharacterRE:FireServer("Del", UID)
                             end
                         end
                     elseif CollectType == "Range" then
@@ -1324,10 +1089,7 @@ Tabs.Pet:AddButton({
                         for UID, PetData in pairs(OwnedPets) do
                             if PetData and not PetData.IsBig and passArea(UID) then
                                 local ps = tonumber(PetData.ProduceSpeed) or 0
-                                if ps >= minV and ps <= maxV then
-                                    if PetData.RE then PetData.RE:FireServer("Claim") end
-                                    CharacterRE:FireServer("Del", UID)
-                                end
+                                if ps >= minV and ps <= maxV then if PetData.RE then PetData.RE:FireServer("Claim") end; CharacterRE:FireServer("Del", UID) end
                             end
                         end
                     end
@@ -1338,39 +1100,16 @@ Tabs.Pet:AddButton({
     end
 })
 
-Tabs.Pet:AddSection("Settings")
-Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 10, Min = 10, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
-Tabs.Pet:AddSlider("AutoCollectPet Delay",{ Title = "Auto Collect Pet Delay", Default = 5, Min = 5, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.CollectPet_Delay = v end })
-
---==== Per-pet foods (เดิม) ====
+--==== Per-pet foods UI (เหมือนเดิม) ====
 local BigPetUIDLabels = {}
-
-local function labelForBigPet(uid, P)
-    return string.format("[%s|%s] %s",
-        tostring(P and P.Type or "?"),
-        tostring(P and P.Mutate or "None"),
-        tostring(uid))
-end
-
-local function labelToUID(v)
-    if type(v) ~= "string" then return v end
-    if BigPetUIDLabels and BigPetUIDLabels[v] then
-        return BigPetUIDLabels[v]
-    end
-    local uid = v:match("%]%s+(.+)$")
-    return uid or v
-end
+local function labelForBigPet(uid, P) return string.format("[%s|%s] %s", tostring(P and P.Type or "?"), tostring(P and P.Mutate or "None"), tostring(uid)) end
+local function labelToUID(v) if type(v) ~= "string" then return v end if BigPetUIDLabels and BigPetUIDLabels[v] then return BigPetUIDLabels[v] end local uid = v:match("%]%s+(.+)$"); return uid or v end
 
 PickPetForFoodDD = Tabs.Pet:AddDropdown("PickPet ForFood", {
     Title = "Pick Big Pet (set foods for this pet)",
     Values = {}, Multi = false, Default = "",
-    Callback = function(label)
-        Configuration.Pet._PickPetForFood = labelToUID(label or "")
-    end
+    Callback = function(label) Configuration.Pet._PickPetForFood = labelToUID(label or "") end
 })
-
-local function _cloneFoodMap_ext(t) return _cloneFoodMap(t) end
-
 local PickFoodsForPetDD = Tabs.Pet:AddDropdown("PickFoods ForOnePet", {
     Title = "Foods allowed for selected pet",
     Description = "เลือกชนิดอาหารที่จะอนุญาตให้สัตว์ตัวนี้กิน (จะพยายามใช้ตามสต็อก)",
@@ -1383,20 +1122,13 @@ Tabs.Pet:AddButton({
     Callback = function()
         local uid   = Configuration.Pet._PickPetForFood
         local draft = Configuration.Pet._PickFoodsDraft
-        if not uid or uid == "" then
-            Fluent:Notify({ Title="Per-Pet Food", Content="กรุณาเลือก Big Pet ก่อน", Duration=4 })
-            return
-        end
-        if type(draft) ~= "table" or next(draft) == nil then
-            Fluent:Notify({ Title="Per-Pet Food", Content="ยังไม่ได้เลือกชนิดอาหาร", Duration=4 })
-            return
-        end
+        if not uid or uid == "" then Fluent:Notify({ Title="Per-Pet Food", Content="กรุณาเลือก Big Pet ก่อน", Duration=4 }); return end
+        if type(draft) ~= "table" or next(draft) == nil then Fluent:Notify({ Title="Per-Pet Food", Content="ยังไม่ได้เลือกชนิดอาหาร", Duration=4 }); return end
         Configuration.Pet.AutoFeed_PetFoods[uid] = _cloneFoodMap(draft)
         Configuration.Pet._PickFoodsDraft = {}
         Fluent:Notify({ Title="Per-Pet Food", Content=("บันทึกอาหารให้ UID: %s แล้ว"):format(uid), Duration=4 })
     end
 })
-
 Tabs.Pet:AddButton({
     Title = "Clear foods for this pet",
     Description = "ล้างรายการอาหารของ Big Pet ตัวที่เลือก",
@@ -1408,39 +1140,20 @@ Tabs.Pet:AddButton({
         end
     end
 })
+Tabs.Pet:AddToggle("Use Per-Pet Foods", { Title = "Use per-pet foods first", Default = true, Callback = function(v) Configuration.Pet.AutoFeed_UsePerPet = v end })
 
-Tabs.Pet:AddToggle("Use Per-Pet Foods", {
-    Title = "Use per-pet foods first",
-    Default = true,
-    Callback = function(v) Configuration.Pet.AutoFeed_UsePerPet = v end
-})
-
--- อัปเดตรายการ label ของ Big Pets
 local function updateBigPetUIDDropdowns()
-    local labels = {}
-    BigPetUIDLabels = {}
+    local labels = {}; BigPetUIDLabels = {}
     for uid, P in pairs(OwnedPets) do
-        if P and P.IsBig then
-            local label = labelForBigPet(uid, P)
-            BigPetUIDLabels[label] = uid
-            table.insert(labels, label)
-        end
+        if P and P.IsBig then local label = labelForBigPet(uid, P); BigPetUIDLabels[label] = uid; table.insert(labels, label) end
     end
     pcall(function() Options["Pet Feed_Targets"]:SetValues(labels) end)
-    if PickPetForFoodDD then
-        pcall(function() PickPetForFoodDD:SetValues(labels) end)
-    end
+    if PickPetForFoodDD then pcall(function() PickPetForFoodDD:SetValues(labels) end) end
 end
-
-table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(function()
-    task.delay(0.2, updateBigPetUIDDropdowns)
-end))
-table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(function()
-    task.delay(0.2, updateBigPetUIDDropdowns)
-end))
+table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(function() task.delay(0.2, updateBigPetUIDDropdowns) end))
+table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(function() task.delay(0.2, updateBigPetUIDDropdowns) end))
 task.defer(updateBigPetUIDDropdowns)
 
--- เลือก Big Pets ที่จะให้อาหาร
 local FeedTargetsDD = Tabs.Pet:AddDropdown("Pet Feed_Targets", {
     Title = "Select Big Pets to Feed",
     Description = "เลือกเฉพาะ Big Pets ที่จะให้อาหาร (เว้นว่าง = ให้อาหาร Big ทุกตัว)",
@@ -1448,20 +1161,12 @@ local FeedTargetsDD = Tabs.Pet:AddDropdown("Pet Feed_Targets", {
     Callback = function(selected)
         local uidSet = {}
         if type(selected) == "table" then
-            for k, on in pairs(selected) do
-                if on then
-                    local uid = labelToUID(k)
-                    uidSet[uid] = true
-                end
-            end
-        elseif type(selected) == "string" and selected ~= "" then
-            uidSet[labelToUID(selected)] = true
-        end
+            for k, on in pairs(selected) do if on then uidSet[labelToUID(k)] = true end end
+        elseif type(selected) == "string" and selected ~= "" then uidSet[labelToUID(selected)] = true end
         Configuration.Pet.AutoFeed_Pets = uidSet
     end
 })
 
--- ตัวกรอง Collect/Place (ของแท็บ Pet ต่อ)
 Tabs.Pet:AddDropdown("CollectPet Type",{ Title = "Collect Pet Type", Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation","Range"}, Multi = false, Default = "All", Callback = function(v) Configuration.Pet.CollectPet_Type = v end })
 Tabs.Pet:AddDropdown("CollectPet Area",{ Title = "Collect Pet Area", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Pet.CollectPet_Area = v end })
 Tabs.Pet:AddDropdown("CollectPet Pets",{ Title = "Collect Pets", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Pets = v end })
@@ -1471,69 +1176,67 @@ Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Nu
 
 -- ====== Pet > Auto Place Pet Settings ======
 Tabs.Pet:AddSection("Auto Place Pet Settings")
-Tabs.Pet:AddDropdown("PlacePet Area", {
-    Title = "Place Area (Pet)",
-    Values = {"Any","Land","Water"},
-    Multi = false,
-    Default = "Any",
-    Callback = function(v) Configuration.Pet.PlaceArea = v end
-})
-Tabs.Pet:AddDropdown("PlacePet Mode", {
-    Title = "Place Mode",
-    Values = {"All","Match","Range"},
-    Multi = false,
-    Default = "All",
-    Callback = function(v)
-        Configuration.Pet.PlacePet_Mode = v
-        
-    end
-})
-Tabs.Pet:AddDropdown("PlacePet Types", {
-    Title = "Place Types (Match)",
-    Values = Pets_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Pet.PlacePet_Types = v;  end
-})
-Tabs.Pet:AddDropdown("PlacePet Mutations", {
-    Title = "Place Mutations (Match)",
-    Values = Mutations_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Pet.PlacePet_Mutations = v;  end
-})
-Tabs.Pet:AddSlider("AutoPlacePet Delay", {
-    Title = "Auto Place Pet Delay", Description = "ดีเลย์การพยายามวางสัตว์ในแต่ละครั้ง (วิ)",
-    Default = 1, Min = 0.1, Max = 5, Rounding = 1,
-    Callback = function(v) Configuration.Pet.AutoPlacePet_Delay = v end
-})
-Tabs.Pet:AddInput("PlacePet_MinIncome", {
-    Title = "Min income/s (Range)",
-    Default = tostring(Configuration.Pet.PlacePet_Between.Min or 0),
-    Numeric = true, Finished = true,
-    Callback = function(v) Configuration.Pet.PlacePet_Between.Min = tonumber(v) or 0;  end
-})
-Tabs.Pet:AddInput("PlacePet_MaxIncome", {
-    Title = "Max income/s (Range)",
-    Default = tostring(Configuration.Pet.PlacePet_Between.Max or 1000000),
-    Numeric = true, Finished = true,
-    Callback = function(v) Configuration.Pet.PlacePet_Between.Max = tonumber(v) or math.huge;  end
-})
-
+Tabs.Pet:AddDropdown("PlacePet Area", { Title = "Place Area (Pet)", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Pet.PlaceArea = v end })
+Tabs.Pet:AddDropdown("PlacePet Mode", { Title = "Place Mode", Values = {"All","Match","Range"}, Multi = false, Default = "All", Callback = function(v) Configuration.Pet.PlacePet_Mode = v end })
+Tabs.Pet:AddDropdown("PlacePet Types", { Title = "Place Types (Match)", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.PlacePet_Types = v end })
+Tabs.Pet:AddDropdown("PlacePet Mutations", { Title = "Place Mutations (Match)", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.PlacePet_Mutations = v end })
+Tabs.Pet:AddSlider("AutoPlacePet Delay", { Title = "Auto Place Pet Delay", Description = "ดีเลย์การพยายามวางสัตว์ในแต่ละครั้ง (วิ)", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Pet.AutoPlacePet_Delay = v end })
+Tabs.Pet:AddInput("PlacePet_MinIncome", { Title = "Min income/s (Range)", Default = tostring(Configuration.Pet.PlacePet_Between.Min or 0), Numeric = true, Finished = true, Callback = function(v) Configuration.Pet.PlacePet_Between.Min = tonumber(v) or 0 end })
+Tabs.Pet:AddInput("PlacePet_MaxIncome", { Title = "Max income/s (Range)", Default = tostring(Configuration.Pet.PlacePet_Between.Max or 1000000), Numeric = true, Finished = true, Callback = function(v) Configuration.Pet.PlacePet_Between.Max = tonumber(v) or math.huge end })
 --============================== Egg ==============================
 Tabs.Egg:AddSection("Main")
 Tabs.Egg:AddToggle("Auto Hatch",{ Title="Auto Hatch", Default=false, Callback=function(v)
     Configuration.Egg.AutoHatch = v
-    if v then TaskMgr.start("AutoHatch", runAutoHatch) else TaskMgr.stop("AutoHatch") end
+    if v then TaskMgr.start("AutoHatch", function(tok)
+        while tok.alive do
+            local wantArea = Configuration.Egg.HatchArea or "Any"
+            for _,egg in pairs(OwnedEggData:GetChildren()) do
+                if not tok.alive then break end
+                local di = egg:FindFirstChild("DI")
+                local hatchable = di and egg:GetAttribute("D") and (ServerTime.Value >= egg:GetAttribute("D"))
+                if hatchable then
+                    local a = eggArea(egg)
+                    if (wantArea == "Any") or (a == wantArea) then
+                        local EggModel = BlockFolder:FindFirstChild(egg.Name)
+                        local RootPart = EggModel and (EggModel.PrimaryPart or EggModel:FindFirstChild("RootPart"))
+                        local RF = RootPart and RootPart:FindFirstChild("RF")
+                        if RF then task.spawn(function() RF:InvokeServer("Hatch") end) end
+                    end
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Egg.Hatch_Delay) or 15) then break end
+        end
+    end) else TaskMgr.stop("AutoHatch") end
 end })
 Tabs.Egg:AddToggle("Auto Egg",{ Title="Auto Buy Egg", Default=false, Callback=function(v)
     Configuration.Egg.AutoBuyEgg = v
-    if v then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) else TaskMgr.stop("AutoBuyEgg") end
+    if v then TaskMgr.start("AutoBuyEgg", function(tok)
+        local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
+        local function currentCoin()
+            local asset = InventoryData or Data:FindFirstChild("Asset")
+            if not asset then return 0 end
+            return tonumber(asset:GetAttribute("Coin") or 0) or 0
+        end
+        while tok.alive do
+            local coinOk = (not Configuration.Egg.CheckMinCoin)
+                or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0))
+            if coinOk then
+                for _,egg in pairs(Egg_Belt) do
+                    if not tok.alive then break end
+                    local EggType = egg.Type
+                    local EggMutation = egg.Mutate
+                    if (Configuration.Egg.Types[EggType]) and (Configuration.Egg.Mutations[EggMutation]) then
+                        if RE then RE:FireServer("BuyEgg", egg.UID) end
+                    end
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Egg.AutoBuyEgg_Delay) or 1) then break end
+        end
+    end) else TaskMgr.stop("AutoBuyEgg") end
 end })
 Tabs.Egg:AddToggle("Auto Place Egg",{ Title="Auto Place Egg", Default=false, Callback=function(v)
     Configuration.Egg.AutoPlaceEgg = v
-    if v then
-        
-        TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg)
-    else
-        TaskMgr.stop("AutoPlaceEgg")
-    end
+    if v then TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg) else TaskMgr.stop("AutoPlaceEgg") end
 end })
 Tabs.Egg:AddToggle("CheckMinCoin",{ Title = "Check Min Coin", Default = false, Callback = function(v) Configuration.Egg.CheckMinCoin = v end })
 
@@ -1543,27 +1246,27 @@ Tabs.Egg:AddSlider("AutoHatch Delay",{ Title = "Hatch Delay", Default = 15, Min 
 Tabs.Egg:AddSlider("AutoBuyEgg Delay",{ Title = "Auto Buy Egg Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Egg.AutoBuyEgg_Delay = v end })
 Tabs.Egg:AddSlider("AutoPlaceEgg Delay",{ Title = "Auto Place Egg Delay", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Egg.AutoPlaceEgg_Delay = v end })
 Tabs.Egg:AddDropdown("PlaceEgg Area", { Title = "Place Area (Egg)", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Egg.PlaceArea = v end })
-Tabs.Egg:AddDropdown("Egg Type", {
-    Title = "Types",
-    Values = Eggs_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Egg.Types = v; end
-})
-Tabs.Egg:AddDropdown("Egg Mutations", {
-    Title = "Mutations",
-    Values = Mutations_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Egg.Mutations = v; end
-})
-Tabs.Egg:AddInput("Min Coin to Buy", {
-    Title = "Min Coin", Default = tostring(Configuration.Egg.MinCoin or 0),
-    Numeric = true, Finished = true,
-    Callback = function(v) Configuration.Egg.MinCoin = tonumber(v) or 0 end
-})
+Tabs.Egg:AddDropdown("Egg Type", { Title = "Types", Values = Eggs_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Types = v end })
+Tabs.Egg:AddDropdown("Egg Mutations", { Title = "Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Egg.Mutations = v end })
+Tabs.Egg:AddInput("Min Coin to Buy", { Title = "Min Coin", Default = tostring(Configuration.Egg.MinCoin or 0), Numeric = true, Finished = true, Callback = function(v) Configuration.Egg.MinCoin = tonumber(v) or 0 end })
 
 --============================== Shop =============================
 Tabs.Shop:AddSection("Main")
 Tabs.Shop:AddToggle("Auto BuyFood",{ Title="Auto Buy Food", Default=false, Callback=function(v)
     Configuration.Shop.Food.AutoBuy = v
-    if v then TaskMgr.start("AutoBuyFood", runAutoBuyFood) else TaskMgr.stop("AutoBuyFood") end
+    if v then TaskMgr.start("AutoBuyFood", function(tok)
+        local FoodList = Data:WaitForChild("FoodStore",30):WaitForChild("LST",30)
+        local RE = GameRemoteEvents:WaitForChild("FoodStoreRE")
+        while tok.alive do
+            for foodName,stockAmount in pairs(FoodList:GetAttributes()) do
+                if not tok.alive then break end
+                if stockAmount > 0 and Configuration.Shop.Food.Foods[foodName] then
+                    if RE then RE:FireServer(foodName) end
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Shop.Food.AutoBuy_Delay) or 1) then break end
+        end
+    end) else TaskMgr.stop("AutoBuyFood") end
 end })
 Tabs.Shop:AddSection("Settings")
 Tabs.Shop:AddSlider("AutoBuyFood Delay",{ Title = "Auto Buy Food Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Shop.Food.AutoBuy_Delay = v end })
@@ -1574,15 +1277,32 @@ Tabs.Event:AddParagraph({ Title = "Event Information", Content = string.format("
 Tabs.Event:AddSection("Main")
 Tabs.Event:AddToggle("Auto Claim Event Quest",{ Title="Auto Claim", Default=false, Callback=function(v)
     Configuration.Event.AutoClaim = v
-    if v then TaskMgr.start("AutoClaim", runAutoClaim) else TaskMgr.stop("AutoClaim") end
+    if v then TaskMgr.start("AutoClaim", function(tok)
+        local Tasks; local EventRE = ResEvent and GameRemoteEvents:WaitForChild(tostring(ResEvent).."RE")
+        if EventTaskData then Tasks = EventTaskData:WaitForChild("Tasks") end
+        while tok.alive do
+            if Tasks and EventRE then
+                for _,Quest in pairs(Tasks:GetChildren()) do
+                    if not tok.alive then break end
+                    EventRE:FireServer({event = "claimreward",id = Quest:GetAttribute("Id")})
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Event.AutoClaim_Delay) or 3) then break end
+        end
+    end) else TaskMgr.stop("AutoClaim") end
 end })
 Tabs.Event:AddSection("Settings")
 Tabs.Event:AddSlider("Event_AutoClaim Delay",{ Title = "Auto Claim Delay", Default = 3, Min = 3, Max = 30, Rounding = 0, Callback = function(v) Configuration.Event.AutoClaim_Delay = v end })
-
 Tabs.Event:AddSection("Lottery")
 Tabs.Event:AddToggle("Auto Lottery Ticket",{ Title="Auto Lottery Ticket", Default=false, Callback=function(v)
     Configuration.Event.AutoLottery = v
-    if v then TaskMgr.start("AutoLottery", runAutoLottery) else TaskMgr.stop("AutoLottery") end
+    if v then TaskMgr.start("AutoLottery", function(tok)
+        local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE",30)
+        while tok.alive do
+            LotteryRE:FireServer({ event = "lottery", count = 1 })
+            if not _waitAlive(tok, tonumber(Configuration.Event.AutoLottery_Delay) or 60) then break end
+        end
+    end) else TaskMgr.stop("AutoLottery") end
 end })
 Tabs.Event:AddSlider("Lottery_Delay", { Title = "Buy Ticket Delay (sec)", Default = 60, Min = 60, Max = 7200, Rounding = 0, Callback = function(v) Configuration.Event.AutoLottery_Delay = v end })
 
@@ -1792,29 +1512,15 @@ Tabs.Players:AddDropdown("GiftType Dropdown",{ Title = "Gift Type", Values = {"A
 Tabs.Players:AddInput("Gift Count Limit", { Title = "จำนวนที่จะส่ง (เว้นว่าง=ทั้งหมด)", Default = "", Numeric = true, Finished = true, Callback = function(v) Configuration.Players.Gift_Limit = v end })
 Tabs.Players:AddInput("GiftPet_MinIncome", { Title = "Min income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Min or 0), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Min = tonumber(v) or 0 end })
 Tabs.Players:AddInput("GiftPet_MaxIncome", { Title = "Max income/s (for Range_Pets)", Default = tostring(Configuration.Players.GiftPet_Between.Max or 1000000), Numeric = true, Finished = true, Callback = function(v) Configuration.Players.GiftPet_Between.Max = tonumber(v) or 1000000 end })
-Tabs.Players:AddDropdown("Gift Foods", {
-    Title = "Foods to Gift (Select)",
-    Description = "เลือกชนิดอาหารที่จะส่ง (ใช้เมื่อ Gift Type = Select_Foods)",
-    Values = PetFoods_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Players.Food_Selected = v end,
-})
-local PickFoodDD = Tabs.Players:AddDropdown("Pick Food Amount", {
-    Title = "Pick Food to set amount",
-    Values = PetFoods_InGame, Multi = false, Default = "",
-    Callback = function(v) Configuration.Players.Food_AmountPick = v end,
-})
-Tabs.Players:AddInput("Set Food Amount", {
-    Title = "Set Amount for picked food",
-    Default = 1, Placeholder = "จำนวนสำหรับชนิดที่เลือก",
-    Numeric = true, Finished = true,
-    Callback = function(v)
-        local food = Configuration.Players.Food_AmountPick
-        if food and food ~= "" then
-            local n = math.max(1, math.floor(tonumber(v) or 1))
-            Configuration.Players.Food_Amounts[food] = n
-        end
-    end,
-})
+Tabs.Players:AddDropdown("Gift Foods", { Title = "Foods to Gift (Select)", Description = "เลือกชนิดอาหารที่จะส่ง (ใช้เมื่อ Gift Type = Select_Foods)", Values = PetFoods_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Food_Selected = v end })
+local PickFoodDD = Tabs.Players:AddDropdown("Pick Food Amount", { Title = "Pick Food to set amount", Values = PetFoods_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.Food_AmountPick = v end })
+Tabs.Players:AddInput("Set Food Amount", { Title = "Set Amount for picked food", Default = 1, Placeholder = "จำนวนสำหรับชนิดที่เลือก", Numeric = true, Finished = true, Callback = function(v)
+    local food = Configuration.Players.Food_AmountPick
+    if food and food ~= "" then
+        local n = math.max(1, math.floor(tonumber(v) or 1))
+        Configuration.Players.Food_Amounts[food] = n
+    end
+end })
 Tabs.Players:AddButton({
     Title = "Init amounts for selected foods",
     Description = "ตั้งจำนวนเริ่มต้น = 1 ให้ทุกชนิดที่เลือก (ถ้ายังไม่เคยตั้ง)",
@@ -1867,9 +1573,7 @@ local function renderSummary()
         table.insert(lines, string.format("\n• %s", tostring(typeName)))
         for _, key in ipairs(MUTA_ORDER) do
             local n = tonumber(mutaCounts[key] or 0) or 0
-            if n > 0 then
-                table.insert(lines, string.format("    - %s %s: %d", MUTA_EMOJI[key], key, n))
-            end
+            if n > 0 then table.insert(lines, string.format("    - %s %s: %d", MUTA_EMOJI[key], key, n)) end
         end
         for m, n in pairs(mutaCounts) do
             if not ORDER_SET[m] and (tonumber(n) or 0) > 0 then
@@ -1877,17 +1581,9 @@ local function renderSummary()
             end
         end
     end
-    for _, t in ipairs(Eggs_InGame) do
-        if map[t] then lineFor(t, map[t]); shown[t]=true end
-    end
-    for t, counts in pairs(map) do
-        if not shown[t] then lineFor(t, counts) end
-    end
-    if #lines == 0 then
-        return "ไม่มีไข่ในกระเป๋า (ที่ยังไม่ถูกวาง) ในตอนนี้"
-    else
-        return table.concat(lines, "\n")
-    end
+    for _, t in ipairs(Eggs_InGame) do if map[t] then lineFor(t, map[t]); shown[t]=true end end
+    for t, counts in pairs(map) do if not shown[t] then lineFor(t, counts) end end
+    if #lines == 0 then return "ไม่มีไข่ในกระเป๋า (ที่ยังไม่ถูกวาง) ในตอนนี้" else return table.concat(lines, "\n") end
 end
 
 Tabs.Inv:AddButton({
@@ -1905,12 +1601,7 @@ Tabs.Sell:AddSection("Main")
 Tabs.Sell:AddDropdown("Sell Mode", { Title = "Sell Mode", Values = { "All_Unplaced_Pets", "All_Unplaced_Eggs", "Filter_Eggs", "Pets_Below_Income" }, Multi = false, Default = "", Callback = function(v) Configuration.Sell.Mode = v end })
 Tabs.Sell:AddDropdown("Sell Egg Types", { Title = "Egg Types (for Filter_Eggs)", Values = Eggs_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Types = v end })
 Tabs.Sell:AddDropdown("Sell Egg Mutations", { Title = "Egg Mutations (for Filter_Eggs)", Values = Mutations_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Mutations = v end })
-Tabs.Sell:AddInput("Pet Income Threshold", {
-    Title = "รายได้ต่อวิ (ขายสัตว์ที่ \"น้อยกว่า\" ค่านี้)",
-    Default = tostring(Configuration.Sell.Pet_Income_Threshold or 0),
-    Numeric = true, Finished = true,
-    Callback = function(v) Configuration.Sell.Pet_Income_Threshold = tonumber(v) or 0 end
-})
+Tabs.Sell:AddInput("Pet Income Threshold", { Title = "รายได้ต่อวิ (ขายสัตว์ที่ \"น้อยกว่า\" ค่านี้)", Default = tostring(Configuration.Sell.Pet_Income_Threshold or 0), Numeric = true, Finished = true, Callback = function(v) Configuration.Sell.Pet_Income_Threshold = tonumber(v) or 0 end })
 Tabs.Sell:AddButton({
     Title = "Sell Now",
     Description = "ขายตามโหมดและตัวกรองที่ตั้งไว้",
@@ -1977,11 +1668,7 @@ Tabs.Sell:AddButton({
                             end
                         end
                     end
-                    Fluent:Notify({
-                        Title = "Sell Summary",
-                        Content = ("รวม %d | สำเร็จ %d | ล้มเหลว %d"):format(total, okCnt, failCnt),
-                        Duration = 7
-                    })
+                    Fluent:Notify({ Title = "Sell Summary", Content = ("รวม %d | สำเร็จ %d | ล้มเหลว %d"):format(total, okCnt, failCnt), Duration = 7 })
                 end},
                 { Title = "No" }
             }
@@ -1996,25 +1683,13 @@ Tabs.Settings:AddToggle("AntiAFK",{ Title="Anti AFK", Default=false, Callback=fu
     Configuration.AntiAFK = v
     if v then TaskMgr.start("AntiAFK", runAntiAFK) else TaskMgr.stop("AntiAFK") end
 end })
-Tabs.Settings:AddToggle("Disable3DOnly", {
-    Title = "Disable 3D Rendering (GUI only)",
-    Default = false,
-    Callback = function(v)
-        Configuration.Perf.Disable3D = v
-        Perf_Set3DEnabled(not v)
-    end
-})
+Tabs.Settings:AddToggle("Disable3DOnly", { Title = "Disable 3D Rendering (GUI only)", Default = false, Callback = function(v)
+    Configuration.Perf.Disable3D = v
+    Perf_Set3DEnabled(not v)
+end })
 Tabs.Settings:AddSection("Debug")
-Tabs.Settings:AddToggle("DebugOn", {
-    Title = "Enable Debug Log",
-    Default = (G.MEOWY_DBG and G.MEOWY_DBG.on) or true,
-    Callback = function(v) G.MEOWY_DBG = G.MEOWY_DBG or {}; G.MEOWY_DBG.on = v end
-})
-Tabs.Settings:AddToggle("DebugToast", {
-    Title = "Show Debug as Toast",
-    Default = (G.MEOWY_DBG and G.MEOWY_DBG.toast) or false,
-    Callback = function(v) G.MEOWY_DBG = G.MEOWY_DBG or {}; G.MEOWY_DBG.toast = v end
-})
+Tabs.Settings:AddToggle("DebugOn", { Title = "Enable Debug Log", Default = (G.MEOWY_DBG and G.MEOWY_DBG.on) or true, Callback = function(v) G.MEOWY_DBG = G.MEOWY_DBG or {}; G.MEOWY_DBG.on = v end })
+Tabs.Settings:AddToggle("DebugToast", { Title = "Show Debug as Toast", Default = (G.MEOWY_DBG and G.MEOWY_DBG.toast) or false, Callback = function(v) G.MEOWY_DBG = G.MEOWY_DBG or {}; G.MEOWY_DBG.toast = v end })
 
 --==============================================================
 --                INIT / THEME / NOTIFY / PERF
@@ -2052,12 +1727,81 @@ local function _autostart()
     if Configuration.Pet.AutoFeed then TaskMgr.start("AutoFeed", runAutoFeed) end
     if Configuration.Pet.CollectPet_Auto then TaskMgr.start("AutoCollectPet", runAutoCollectPet) end
     if Configuration.Pet.AutoPlacePet then TaskMgr.start("AutoPlacePet", runAutoPlacePet) end
-    if Configuration.Egg.AutoHatch then TaskMgr.start("AutoHatch", runAutoHatch) end
-    if Configuration.Egg.AutoBuyEgg then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) end
+    if Configuration.Egg.AutoHatch then TaskMgr.start("AutoHatch", function(tok)
+        while tok.alive do
+            local wantArea = Configuration.Egg.HatchArea or "Any"
+            for _,egg in pairs(OwnedEggData:GetChildren()) do
+                if not tok.alive then break end
+                local di = egg:FindFirstChild("DI")
+                local hatchable = di and egg:GetAttribute("D") and (ServerTime.Value >= egg:GetAttribute("D"))
+                if hatchable then
+                    local a = eggArea(egg)
+                    if (wantArea == "Any") or (a == wantArea) then
+                        local EggModel = BlockFolder:FindFirstChild(egg.Name)
+                        local RootPart = EggModel and (EggModel.PrimaryPart or EggModel:FindFirstChild("RootPart"))
+                        local RF = RootPart and RootPart:FindFirstChild("RF")
+                        if RF then task.spawn(function() RF:InvokeServer("Hatch") end) end
+                    end
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Egg.Hatch_Delay) or 15) then break end
+        end
+    end) end
+    if Configuration.Egg.AutoBuyEgg then TaskMgr.start("AutoBuyEgg", function(tok)
+        local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
+        local function currentCoin()
+            local asset = InventoryData or Data:FindFirstChild("Asset")
+            if not asset then return 0 end
+            return tonumber(asset:GetAttribute("Coin") or 0) or 0
+        end
+        while tok.alive do
+            local coinOk = (not Configuration.Egg.CheckMinCoin)
+                or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0))
+            if coinOk then
+                for _,egg in pairs(Egg_Belt) do
+                    if not tok.alive then break end
+                    if (Configuration.Egg.Types[egg.Type]) and (Configuration.Egg.Mutations[egg.Mutate]) then
+                        if RE then RE:FireServer("BuyEgg", egg.UID) end
+                    end
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Egg.AutoBuyEgg_Delay) or 1) then break end
+        end
+    end) end
     if Configuration.Egg.AutoPlaceEgg then TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg) end
-    if Configuration.Shop.Food.AutoBuy then TaskMgr.start("AutoBuyFood", runAutoBuyFood) end
-    if Configuration.Event.AutoClaim then TaskMgr.start("AutoClaim", runAutoClaim) end
-    if Configuration.Event.AutoLottery then TaskMgr.start("AutoLottery", runAutoLottery) end
+    if Configuration.Shop.Food.AutoBuy then TaskMgr.start("AutoBuyFood", function(tok)
+        local FoodList = Data:WaitForChild("FoodStore",30):WaitForChild("LST",30)
+        local RE = GameRemoteEvents:WaitForChild("FoodStoreRE")
+        while tok.alive do
+            for foodName,stockAmount in pairs(FoodList:GetAttributes()) do
+                if not tok.alive then break end
+                if stockAmount > 0 and Configuration.Shop.Food.Foods[foodName] then
+                    if RE then RE:FireServer(foodName) end
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Shop.Food.AutoBuy_Delay) or 1) then break end
+        end
+    end) end
+    if Configuration.Event.AutoClaim then TaskMgr.start("AutoClaim", function(tok)
+        local Tasks; local EventRE = ResEvent and GameRemoteEvents:WaitForChild(tostring(ResEvent).."RE")
+        if EventTaskData then Tasks = EventTaskData:WaitForChild("Tasks") end
+        while tok.alive do
+            if Tasks and EventRE then
+                for _,Quest in pairs(Tasks:GetChildren()) do
+                    if not tok.alive then break end
+                    EventRE:FireServer({event = "claimreward",id = Quest:GetAttribute("Id")})
+                end
+            end
+            if not _waitAlive(tok, tonumber(Configuration.Event.AutoClaim_Delay) or 3) then break end
+        end
+    end) end
+    if Configuration.Event.AutoLottery then TaskMgr.start("AutoLottery", function(tok)
+        local LotteryRE = GameRemoteEvents:WaitForChild("LotteryRE",30)
+        while tok.alive do
+            LotteryRE:FireServer({ event = "lottery", count = 1 })
+            if not _waitAlive(tok, tonumber(Configuration.Event.AutoLottery_Delay) or 60) then break end
+        end
+    end) end
 end
 _autostart()
 
