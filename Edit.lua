@@ -121,16 +121,67 @@ end
 --==============================================================
 --                      HELPERS
 --==============================================================
+-- ================= Occupancy (drop-in) =================
+-- Anchor finder (Model/BasePart)
+local function anchorOf(inst: Instance)
+    if inst:IsA("Model") then
+        return inst.PrimaryPart
+            or inst:FindFirstChild("RootPart")
+            or inst:FindFirstChildWhichIsA("BasePart")
+    elseif inst:IsA("BasePart") then
+        return inst
+    else
+        return inst:FindFirstChildWhichIsA("BasePart")
+    end
+end
+
+-- Proximity occupancy check (แทนฟิสิกส์)
+local function IsOccupiedAtPosition(pos: Vector3, radius: number?)
+    local R = radius or 5
+
+    -- 1) สัตว์ที่วางแล้ว (workspace.Pets)
+    for _, P in ipairs(Pet_Folder:GetChildren()) do
+        local rp = anchorOf(P)
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
+    end
+
+    -- 2) บล็อค/ไข่ที่วางแล้ว (workspace.PlayerBuiltBlocks)
+    for _, child in ipairs(BlockFolder:GetChildren()) do
+        local rp = anchorOf(child)
+        if rp and (rp.Position - pos).Magnitude <= R then
+            return true
+        end
+    end
+
+    -- 3) ไข่จาก Data (ใช้ DI)
+    for _, E in ipairs(OwnedEggData:GetChildren()) do
+        local di = E:FindFirstChild("DI")
+        if di then
+            local v = Vector3.new(
+                di:GetAttribute("X") or 0,
+                di:GetAttribute("Y") or 0,
+                di:GetAttribute("Z") or 0
+            )
+            if (v - pos).Magnitude <= R then
+                return true
+            end
+        end
+    end
+
+    return false
+end
 
 -- (Helper) ฟังก์ชันสำหรับวาร์ปตัวละครไปใกล้ตำแหน่งเป้าหมาย (เวอร์ชันบังคับวาร์ปทุกครั้ง)
 local function ensureNear(position)
-    local char = Player.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-
-    dprint("Teleporting to placement location to ensure proximity...")
-    root.CFrame = CFrame.new(position + Vector3.new(0, 3, 0))
-    task.wait(0.2) -- ให้เวลาตัวละครตั้งตัว
+    if (root.Position - position).Magnitude > 45 then
+        dprint("Teleporting to placement location to ensure proximity...")
+        root.CFrame = CFrame.new(position + Vector3.new(0, 3, 0))
+        task.wait(0.15)
+    end
 end
 
 local function _toggleWhiteOverlay(show)
@@ -670,34 +721,10 @@ end
 
 -- ==== REPLACE: ตรวจสอบว่า “แปลง” ว่างจริง (ไม่มีสัตว์และไม่มีไข่) ====
 local function isFarmTileOccupied(farmPart, minDistance)
-    minDistance = minDistance or 4
     local center = farmPart.Position
-    local regionSize = Vector3.new(farmPart.Size.X, farmPart.Size.Y + 12, farmPart.Size.Z)
-
-    local params = OverlapParams.new()
-    params.FilterDescendantsInstances = { farmPart }   -- กันชนเอง
-    params.FilterType = Enum.RaycastFilterType.Exclude
-
-    local partsInBox = workspace:GetPartBoundsInBox(farmPart.CFrame, regionSize, params)
-    for _, part in ipairs(partsInBox) do
-        -- ข้ามพาร์ทโปร่ง/ตกแต่งเล็ก ๆ เพื่อลด false positive
-        if part.CanCollide or part.Transparency < 0.95 then
-            local model = part:FindFirstAncestorOfClass("Model")
-            if model then
-                -- ถือว่า “ถูกยึด” ถ้าเจอสัตว์หรือไข่ อยู่ใกล้เกินระยะที่กำหนด
-                if isPetLikeModel(model) or isEggLikeModel(model) then
-                    local pivot = nil
-                    pcall(function() pivot = model:GetPivot().Position end)
-                    pivot = pivot or (model.PrimaryPart and model.PrimaryPart.Position) or part.Position
-                    if (pivot - center).Magnitude < minDistance then
-                        return true
-                    end
-                end
-            end
-        end
-    end
-    return false
+    return IsOccupiedAtPosition(center, (minDistance or 4) + 0.1)
 end
+
 
 local function getPlayerRootPosition()
     return Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") and Player.Character.HumanoidRootPart.Position
@@ -706,29 +733,27 @@ end
 local function findAvailableFarmPartNearPosition(farmParts, minDistance, targetPosition)
     if not farmParts or #farmParts == 0 then return nil end
 
-    -- กรณีไม่มีตำแหน่งเป้าหมาย: เลือกจากรายการที่ “ว่างจริง” แบบสุ่ม
+    -- ถ้าไม่ระบุตำแหน่ง: หาช่องว่างอันแรกพอ
     if not targetPosition then
-        local candidates = {}
         for _, part in ipairs(farmParts) do
             if not isFarmTileOccupied(part, minDistance) then
-                table.insert(candidates, part)
+                return part
             end
         end
-        if #candidates == 0 then return nil end
-        return candidates[math.random(1, #candidates)]
+        return nil
     end
 
-    -- มีตำแหน่งเป้าหมาย: เรียงตามระยะแล้วหยิบแปลงแรกที่ว่างจริง
-    local sorted = table.clone(farmParts)
-    table.sort(sorted, function(a, b)
-        return (a.Position - targetPosition).Magnitude < (b.Position - targetPosition).Magnitude
-    end)
-    for _, part in ipairs(sorted) do
+    -- มีตำแหน่งเป้าหมาย: เลือกช่องว่างที่ "ใกล้สุด"
+    local best, bestDist = nil, math.huge
+    for _, part in ipairs(farmParts) do
         if not isFarmTileOccupied(part, minDistance) then
-            return part
+            local d = (part.Position - targetPosition).Magnitude
+            if d < bestDist then
+                best, bestDist = part, d
+            end
         end
     end
-    return nil
+    return best
 end
 
 
