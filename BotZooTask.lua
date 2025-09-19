@@ -520,7 +520,7 @@ table.insert(EnvirontmentConnections,Pet_Folder.ChildAdded:Connect(function(pet)
             Type = (petPrimaryPart:GetAttribute("Type")),
             Mutate = (petPrimaryPart:GetAttribute("Mutate")),
             Model = pet, RootPart = petPrimaryPart,
-            RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE",true")),
+            RE = (petPrimaryPart and petPrimaryPart:FindFirstChild("RE", true)),
             IsBig = (petPrimaryPart and (petPrimaryPart:GetAttribute("BigValue") ~= nil))
         },{
             __index = (function(tb, ind)
@@ -781,7 +781,7 @@ Tabs.Main:AddToggle("AutoCollect",{ Title = "Auto Collect", Default = false, Cal
     TaskMgr.toggle(v, "AutoCollect", runAutoCollect)
 end })
 Tabs.Main:AddSection("Settings")
-Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 5, Min = 30, Max = 180, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
+Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 30, Min = 30, Max = 180, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
 Tabs.Main:AddDropdown("CollectCash Type",{ Title = "Select Type", Values = {"Delay","Between"}, Multi = false, Default = "Delay", Callback = function(v) Configuration.Main.Collect_Type = v end })
 Tabs.Main:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Min = tonumber(v) end })
 Tabs.Main:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Main.Collect_Between.Max = tonumber(v) end })
