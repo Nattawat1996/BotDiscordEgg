@@ -562,46 +562,56 @@ end
 --==============================================================
 
 --==============================================================
--- Auto Place Pet (ลดแลค: สแกน “จำนวนช่องว่าง” ก่อน แล้วค่อยเลือกสัตว์เท่าที่ต้องใช้)
--- แทนที่ runAutoPlacePet ตัวเดิมได้เลย
+--   AUTO PLACE PET (สแกนจำนวนช่องว่างก่อน แล้วค่อยเลือกสัตว์ตามตัวกรอง)
+--   - สแกนหาจำนวน tile ว่างในพื้นที่ที่เลือก (Any/Land/Water)
+--   - เลือก “สัตว์ที่ยังไม่ถูกวาง” แล้วกรองด้วยโหมด All/Match/Range
+--   - เรียงตาม income/s จากมากไปน้อย แล้วหยิบเท่าจำนวนช่องว่าง
+--   - วางโดยไม่วาร์ปตัวละคร
+--   วางบล็อกนี้แทนเวอร์ชัน runAutoPlacePet เดิม
 --==============================================================
 
--- == helpers เดิมที่ใช้ร่วม (ถ้าในไฟล์คุณมีแล้ว ข้ามส่วนซ้ำได้) ==
+-- == local utils ==
 local function __round(n) return math.floor((tonumber(n) or 0) + 0.5) end
 local function __keyXZ(x,z) return string.format("%d,%d", __round(x), __round(z)) end
 local function __getAttrs(inst) local ok,a=pcall(function() return inst:GetAttributes() end) return ok and a or {} end
+
 local function __parseGCP(v)
-    if typeof(v)=="Vector3" then return v end
-    if type(v)=="table" then
-        local x=v.X or v.x or v[1] or 0
-        local y=v.Y or v.y or v[2] or 0
-        local z=v.Z or v.z or v[3] or 0
+    if typeof(v) == "Vector3" then return v end
+    if type(v) == "table" then
+        local x = v.X or v.x or v[1] or 0
+        local y = v.Y or v.y or v[2] or 0
+        local z = v.Z or v.z or v[3] or 0
         return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
     end
-    if type(v)=="string" then
-        local x,y,z=v:match("%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*")
+    if type(v) == "string" then
+        local x,y,z = v:match("%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*")
         return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
     end
     return nil
 end
-local function __ensureNear(position)
-    local c = Player.Character
-    local root = c and c:FindFirstChild("HumanoidRootPart")
-    if root then root.CFrame = CFrame.new(position + Vector3.new(0,3,0)) end
-end
 
+-- == เก็บ Tile ทั้งหมดของเกาะ (แบ่ง Land/Water, สร้าง keyXZ)
 local function __collectTiles()
     local tiles = {}
     for _,p in ipairs(Island:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name:match("^Farm_split_") or p.Name:match("^WaterFarm_split_")) then
             local area = p.Name:match("^Water") and "Water" or "Land"
-            tiles[#tiles+1] = { part=p, pos=p.Position, area=area, key=__keyXZ(p.Position.X, p.Position.Z) }
+            tiles[#tiles+1] = {
+                part = p,
+                pos  = p.Position,
+                area = area,
+                key  = __keyXZ(p.Position.X, p.Position.Z),
+            }
         end
     end
-    table.sort(tiles, function(a,b) if a.pos.Z~=b.pos.Z then return a.pos.Z<b.pos.Z end return a.pos.X<b.pos.X end)
+    table.sort(tiles, function(a,b)
+        if a.pos.Z ~= b.pos.Z then return a.pos.Z < b.pos.Z end
+        return a.pos.X < b.pos.X
+    end)
     return tiles
 end
 
+-- == set ของตำแหน่งที่ถูกยึดจากสัตว์ (อ้างอิง GridCenterPos)
 local function __occupiedKeysFromPets()
     local keys = {}
     for _, m in ipairs(Pet_Folder:GetChildren()) do
@@ -615,19 +625,20 @@ local function __occupiedKeysFromPets()
     return keys
 end
 
--- คืน “ลิสต์ tile ว่าง” ตามพื้นที่ที่เลือก (สแกนครั้งเดียวต่อรอบ)
-local function __freeTiles(area) -- "Any" | "Land" | "Water"
+-- == คืน “รายการ tile ว่าง” ตามพื้นที่ที่เลือก
+local function __freeTiles(area) -- "Any"|"Land"|"Water"
     local tiles = __collectTiles()
     local occ   = __occupiedKeysFromPets()
     local out = {}
     for _,t in ipairs(tiles) do
-        if not occ[t.key] and (area=="Any" or t.area==area) then
+        if not occ[t.key] and (area == "Any" or t.area == area) then
             out[#out+1] = t
         end
     end
     return out
 end
 
+-- == สัตว์ที่ยังไม่ถูกวาง (ไม่มีโมเดลอยู่ใน workspace.Pets)
 local function __getUnplacedPetUIDs()
     local uids = {}
     for _, petNode in ipairs(OwnedPetData:GetChildren()) do
@@ -638,91 +649,82 @@ local function __getUnplacedPetUIDs()
     return uids
 end
 
--- คัดกรองตามโหมด UI แต่ “จำกัดจำนวน” ตามช่องว่าง เพื่อลดการเช็ค income/s
-local function __pickPetUIDsForFreeSlots(maxCount)
+-- == คัดกรองตามโหมด UI: All / Match / Range
+local function __filterPetsForPlacing(uids)
     local mode = Configuration.Pet.PlacePet_Mode or "All"
-    local picked = {}
-    if maxCount <= 0 then return picked end
+    if mode == "All" then return uids end
+    local res = {}
 
-    local base = __getUnplacedPetUIDs()
-    if #base == 0 then return picked end
-
-    if mode == "All" then
-        for i=1, math.min(maxCount, #base) do picked[#picked+1] = base[i] end
-        return picked
-    end
-
-    if mode == "Match" then
-        for _, uid in ipairs(base) do
-            local node = OwnedPetData:FindFirstChild(uid)
-            if node then
-                local t = node:GetAttribute("T")
-                local m = node:GetAttribute("M") or "None"
-                if Configuration.Pet.PlacePet_Types[t] and Configuration.Pet.PlacePet_Mutations[m] then
-                    picked[#picked+1] = uid
-                    if #picked >= maxCount then break end
+    for _, uid in ipairs(uids) do
+        local petNode = OwnedPetData:FindFirstChild(uid)
+        if petNode then
+            if mode == "Match" then
+                local t = petNode:GetAttribute("T")
+                local m = petNode:GetAttribute("M") or "None"
+                if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
+                    res[#res+1] = uid
+                end
+            elseif mode == "Range" then
+                local inc = GetInventoryIncomePerSecByUID(uid)
+                local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
+                local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
+                if inc >= mn and inc <= mx then
+                    res[#res+1] = uid
                 end
             end
         end
-        return picked
     end
-
-    -- mode == "Range": เช็ค income/s เท่าที่จำเป็น จนกว่าจะครบจำนวนช่องว่าง
-    if mode == "Range" then
-        local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
-        local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
-        for _, uid in ipairs(base) do
-            local inc = GetInventoryIncomePerSecByUID(uid) -- เรียกเฉพาะเท่าที่จำเป็น
-            if inc >= mn and inc <= mx then
-                picked[#picked+1] = uid
-                if #picked >= maxCount then break end
-            end
-        end
-        return picked
-    end
-
-    return picked
+    return res
 end
 
+-- == ส่งคำสั่ง “Place” ไปยังเซิร์ฟเวอร์ (ไม่วาร์ปตัวละคร)
 local function __placeOnePetToPos(uid, worldPos)
-    __ensureNear(worldPos)
-    task.wait(0.2)
     CharacterRE:FireServer("Focus", uid)
-    task.wait(0.25)
+    task.wait(0.12)
     CharacterRE:FireServer("Place", { DST = Vector3.new(worldPos.X, worldPos.Y, worldPos.Z), ID = uid })
-    task.wait(0.2)
+    task.wait(0.08)
     CharacterRE:FireServer("Focus")
-    return Pet_Folder:WaitForChild(uid, 3) ~= nil
+    local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
+    return ok
 end
 
--- วางตามจำนวน “ช่องว่างที่สแกนไว้” โดยไม่ต้องสแกน income/s เกินจำเป็น
+-- == Runner: สแกนช่องว่างก่อน แล้วค่อยเลือกสัตว์ตาม filter (เรียงรายได้สูงสุด)
 local function runAutoPlacePet(tok)
     while tok.alive do
-        local area      = Configuration.Pet.PlaceArea or "Any"
+        local area = Configuration.Pet.PlaceArea or "Any"
+
+        -- 1) สแกนช่องว่างในพื้นที่ที่เลือก
         local freeTiles = __freeTiles(area)
-        local freeCount = #freeTiles
+        local slots = #freeTiles
 
-        if freeCount > 0 then
-            local wantUIDs = __pickPetUIDsForFreeSlots(freeCount)
-            local limit    = math.min(#wantUIDs, freeCount)
+        if slots > 0 then
+            -- 2) รวม “สัตว์ยังไม่ถูกวาง” แล้วกรองตามโหมด
+            local uids = __getUnplacedPetUIDs()
+            if #uids > 0 then
+                uids = __filterPetsForPlacing(uids)
 
-            for i = 1, limit do
-                if not tok.alive then break end
-                local uid  = wantUIDs[i]
-                local tile = freeTiles[i]
-                if tile then
+                -- 3) เรียงตาม income/s มาก → น้อย
+                table.sort(uids, function(a,b)
+                    return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
+                end)
+
+                -- 4) หยิบตามจำนวนช่องว่าง
+                local takeN = math.min(slots, #uids)
+                for i = 1, takeN do
+                    if not tok.alive then break end
+                    local uid  = uids[i]
+                    local tile = freeTiles[i]      -- แมปหนึ่งต่อหนึ่ง
                     local ok = __placeOnePetToPos(uid, tile.pos)
-                    dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
+                    dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL", "→", tile.pos)
                     task.wait(0.12)
                 end
             end
         end
 
-        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then
-            break
-        end
+        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
+
 
 
 local function runAutoPlaceEgg(tok)
