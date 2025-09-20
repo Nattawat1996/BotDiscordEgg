@@ -634,75 +634,56 @@ local function __parseGCP(v)
     return nil
 end
 
--- == เก็บ Tile ทั้งหมดของเกาะ (แบ่ง Land/Water, สร้าง keyXZ)
-local function __collectTiles()
-    local tiles = {}
-    for _,p in ipairs(Island:GetDescendants()) do
-        if p:IsA("BasePart") and (p.Name:match("^Farm_split_") or p.Name:match("^WaterFarm_split_")) then
-            local area = p.Name:match("^Water") and "Water" or "Land"
-            tiles[#tiles+1] = {
-                part = p,
-                pos  = p.Position,
-                area = area,
-                key  = __keyXZ(p.Position.X, p.Position.Z),
-            }
-        end
-    end
-    table.sort(tiles, function(a,b)
-        if a.pos.Z ~= b.pos.Z then return a.pos.Z < b.pos.Z end
-        return a.pos.X < b.pos.X
-    end)
-    return tiles
+-- ==== FAST tile / occupancy (no re-scanning island) ====
+
+local function _dist2(a, b)
+    local dx, dy, dz = a.X - b.X, a.Y - b.Y, a.Z - b.Z
+    return dx*dx + dy*dy + dz*dz
 end
 
-local function __occupiedKeysFromPets()
+-- ใช้ MyPets_List ที่คุณมีแล้ว เพื่อทำแผนที่ช่องที่ถูกยึด (key = _keyXZ)
+local function __occupiedKeysFromPets_fast()
     local keys = {}
     for _, m in ipairs(MyPets_List) do
         local root = m.PrimaryPart or m:FindFirstChild("RootPart")
-        local gcp = nil
-        if root then
-            gcp = root:GetAttribute("GridCenterPos")
-        end
-        if not gcp then
-            gcp = m:GetAttribute("GridCenterPos")
-        end
+        local gcp = root and root:GetAttribute("GridCenterPos") or m:GetAttribute("GridCenterPos")
         if gcp then
-            local v = (typeof(gcp) == "Vector3") and gcp or Vector3.new(gcp.X or gcp.x or gcp[1] or 0, gcp.Y or gcp.y or gcp[2] or 0, gcp.Z or gcp.z or gcp[3] or 0)
-            keys[(__keyXZ(v.X, v.Z))] = true
+            local v = typeof(gcp)=="Vector3" and gcp or Vector3.new(
+                gcp.X or gcp.x or gcp[1] or 0,
+                gcp.Y or gcp.y or gcp[2] or 0,
+                gcp.Z or gcp.z or gcp[3] or 0
+            )
+            keys[_keyXZ(v.X, v.Z)] = true
         end
     end
     return keys
 end
 
--- == คืนรายการ Tile ว่างตามพื้นที่ที่ต้องการ
-local function __freeTiles(area) -- "Any"|"Land"|"Water"
-    local tiles = __collectTiles()
-    local occ   = __occupiedKeysFromPets()
+-- สร้าง “รายการช่องว่าง” จาก SortedPlots (ไม่ GetDescendants/ไม่ sort ใหม่)
+local function __buildFreeList(area)
+    local occ = __occupiedKeysFromPets_fast()
+    local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
     local free = {}
-    for _,t in ipairs(tiles) do
-        if not occ[t.key] then
-            if (area == "Any") or (t.area == area) then
-                free[#free+1] = t
-            end
+    for i = 1, #pool do
+        local part = pool[i]
+        local k = _keyXZ(part.Position.X, part.Position.Z)
+        if not occ[k] then
+            free[#free+1] = { part = part, pos = part.Position, key = k }
         end
     end
     return free
 end
 
--- == เลือก tile ว่าง (first / near-player)
-local function __pickFreeTile(area, mode)
-    area = area or "Any"; mode = mode or "near-player"
-    local list = __freeTiles(area)
-    if #list == 0 then return nil end
-    if mode == "first" then return list[1] end
-    local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return list[1] end
-    local best, bestd
-    for _,t in ipairs(list) do
-        local d = (t.pos - hrp.Position).Magnitude
-        if not bestd or d < bestd then best, bestd = t, d end
+-- เลือก index ใน free-list (คืนค่า: idx, node) — รองรับ near-player แบบเร็ว
+local function __pickIndexFromFreeList(freeList, mode, hrpPos)
+    if #freeList == 0 then return nil, nil end
+    if mode == "first" or not hrpPos then return 1, freeList[1] end
+    local bestIdx, bestD2
+    for i = 1, #freeList do
+        local d2 = _dist2(freeList[i].pos, hrpPos)
+        if not bestD2 or d2 < bestD2 then bestIdx, bestD2 = i, d2 end
     end
-    return best or list[1]
+    return bestIdx or 1, freeList[bestIdx or 1]
 end
 
 -- == หารายชื่อสัตว์ที่ยัง “ไม่ถูกวาง” (ไม่มีโมเดลใน workspace.Pets)
@@ -716,8 +697,8 @@ local function __getUnplacedPetUIDs()
     return uids
 end
 
--- == คัดกรองตามโหมด UI: All / Match / Range
-local function __filterPetsForPlacing(list)
+-- รับ inc_map (optional) เพื่อเลี่ยงอ่าน GUI ระหว่างคัดกรอง
+local function __filterPetsForPlacing(list, inc_map)
     local mode = Configuration.Pet.PlacePet_Mode or "All"
     if mode == "All" then return list end
 
@@ -729,20 +710,22 @@ local function __filterPetsForPlacing(list)
                 local t = petNode:GetAttribute("T")
                 local m = petNode:GetAttribute("M") or "None"
                 if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
-                    table.insert(out, uid)
+                    out[#out+1] = uid
                 end
             elseif mode == "Range" then
-                local inc = GetInventoryIncomePerSecByUID(uid)
+                local inc = inc_map and inc_map[uid]
+                if inc == nil then inc = GetInventoryIncomePerSecByUID(uid) end
                 local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
                 local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
                 if inc >= mn and inc <= mx then
-                    table.insert(out, uid)
+                    out[#out+1] = uid
                 end
             end
         end
     end
     return out
 end
+
 
 -- == ส่งคำสั่ง “Place” ไปยังเซิร์ฟเวอร์
 local function __placeOnePetToPos(uid, worldPos)
@@ -770,31 +753,48 @@ local function runAutoPlacePet(tok)
     while tok.alive do
         local area = Configuration.Pet.PlaceArea or "Any"
 
-        -- 1) ถ้า “ไม่มีพื้นที่ว่างเลย” ให้แจ้งเตือนและปิดสวิตช์ทันที
-        local freeNow = __freeTiles(area)
-        if #freeNow == 0 then
+        -- 1) free-list ครั้งเดียวตอนเริ่มรอบ
+        local freeList = __buildFreeList(area)
+        if #freeList == 0 then
             Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างให้วางสัตว์แล้ว • ปิด Auto Place ให้", Duration = 5 })
-            -- ปิด Toggle บน UI (id ตรงกับตอน AddToggle)
             pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
             TaskMgr.stop("AutoPlacePet")
             break
         end
 
-        -- 2) หา UID ที่ยังไม่ถูกวาง แล้วคัดกรองตามโหมดใน UI
-        local uids = __getUnplacedPetUIDs()
-        if #uids > 0 then
-            table.sort(uids, function(a,b)
-                return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
-            end)
-            uids = __filterPetsForPlacing(uids)
+        -- 2) หารายชื่อสัตว์ที่ยังไม่ถูกวาง
+        local uids = {}
+        for _, petNode in ipairs(OwnedPetData:GetChildren()) do
+            local uid = petNode.Name
+            if not Pet_Folder:FindFirstChild(uid) then
+                uids[#uids+1] = uid
+            end
+        end
 
-            -- 3) วางทีละตัว; ถ้าระหว่างทางพื้นที่หมด ให้แจ้งเตือนและปิด Toggle
+        if #uids > 0 then
+            -- 3) แคช income/s ครบทุก uid ครั้งเดียว
+            local inc_by_uid = {}
+            for i = 1, #uids do
+                local uid = uids[i]
+                inc_by_uid[uid] = GetInventoryIncomePerSecByUID(uid) or 0
+            end
+
+            -- 4) sort โดยใช้แคช (ไม่อ่าน GUI ใน comparator)
+            table.sort(uids, function(a,b)
+                return (inc_by_uid[a] or 0) > (inc_by_uid[b] or 0)
+            end)
+
+            -- 5) คัดกรองตามโหมด โดยส่ง inc_by_uid เข้าไป
+            uids = __filterPetsForPlacing(uids, inc_by_uid)
+
+            -- 6) เตรียมตำแหน่งผู้เล่นสำหรับ near-player เพียงครั้งเดียว
+            local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+            local hrpPos = hrp and hrp.Position or nil
+
+            -- 7) วางทีละตัว: หยิบ index จาก freeList แล้วลบช่องที่ใช้ไป
             for _, uid in ipairs(uids) do
                 if not tok.alive then break end
-
-                -- รีเช็คพื้นที่ว่างก่อนวางทุกครั้ง
-                freeNow = __freeTiles(area)
-                if #freeNow == 0 then
+                if #freeList == 0 then
                     Fluent:Notify({ Title = "Auto Place Pet", Content = "พื้นที่ว่างหมดระหว่างการวาง • ปิด Auto Place ให้", Duration = 5 })
                     pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
                     TaskMgr.stop("AutoPlacePet")
@@ -802,15 +802,32 @@ local function runAutoPlacePet(tok)
                     break
                 end
 
-                local ok = select(1, placePetOnFreeTile(uid, area, "near-player"))
-                dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
+                local pickMode = "near-player"
+                local idx, node = __pickIndexFromFreeList(freeList, pickMode, hrpPos)
+                if not idx or not node then break end
+
+                -- ส่งคำสั่งวาง
                 task.wait(0.15)
+                CharacterRE:FireServer("Focus", uid)
+                task.wait(0.25)
+                CharacterRE:FireServer("Place", { DST = node.pos, ID = uid })
+                task.wait(0.75)
+                CharacterRE:FireServer("Focus")
+
+                local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
+                dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
+
+                -- ใช้ช่องนี้แล้ว ก็ลบทิ้งจาก free-list (ป้องกัน re-scan)
+                if ok then table.remove(freeList, idx) end
+
+                task.wait(0.1)
             end
         end
 
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
+
 
 local function runAutoPlaceEgg(tok)
     dprint("[AutoPlaceEgg] temporarily disabled (stub).")
@@ -1120,16 +1137,15 @@ Tabs.Pet:AddToggle("Auto Collect Pet",{ Title="Auto Collect Pet", Default=false,
     Configuration.Pet.CollectPet_Auto = v
     if v then TaskMgr.start("AutoCollectPet", runAutoCollectPet) else TaskMgr.stop("AutoCollectPet") end
 end })
--- NOTE: Toggle เดิมคงไว้ แต่ตอน on จะสตาร์ทสตับ + toast
-Tabs.Pet:AddToggle("Auto Place Pet",{ Title="Auto Place Pet", Default=false, Callback=function(v)
-    Configuration.Pet.AutoPlacePet = v
-    if v then
-        Fluent:Notify({ Title = "Auto Place Pet", Content = "This feature is temporarily disabled (stub).", Duration = 4 })
-        TaskMgr.start("AutoPlacePet", runAutoPlacePet)
-    else
-        TaskMgr.stop("AutoPlacePet")
+
+Tabs.Pet:AddToggle("Auto Place Pet",{
+    Title="Auto Place Pet", Default=false,
+    Callback=function(v)
+        Configuration.Pet.AutoPlacePet = v
+        if v then TaskMgr.start("AutoPlacePet", runAutoPlacePet)
+        else TaskMgr.stop("AutoPlacePet") end
     end
-end })
+})
 
 Tabs.Pet:AddButton({
     Title = "Collect Pet",
