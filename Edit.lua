@@ -1,6 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
---V2.1
+--V2.2
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -769,21 +769,45 @@ end
 local function runAutoPlacePet(tok)
     while tok.alive do
         local area = Configuration.Pet.PlaceArea or "Any"
+
+        -- 1) ถ้า “ไม่มีพื้นที่ว่างเลย” ให้แจ้งเตือนและปิดสวิตช์ทันที
+        local freeNow = __freeTiles(area)
+        if #freeNow == 0 then
+            Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างให้วางสัตว์แล้ว • ปิด Auto Place ให้", Duration = 5 })
+            -- ปิด Toggle บน UI (id ตรงกับตอน AddToggle)
+            pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+            TaskMgr.stop("AutoPlacePet")
+            break
+        end
+
+        -- 2) หา UID ที่ยังไม่ถูกวาง แล้วคัดกรองตามโหมดใน UI
         local uids = __getUnplacedPetUIDs()
         if #uids > 0 then
-            -- เรียงตาม income/s สูงไปต่ำ เพื่อให้ช่องดีๆได้ตัวคุ้มก่อน
             table.sort(uids, function(a,b)
                 return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
             end)
             uids = __filterPetsForPlacing(uids)
 
+            -- 3) วางทีละตัว; ถ้าระหว่างทางพื้นที่หมด ให้แจ้งเตือนและปิด Toggle
             for _, uid in ipairs(uids) do
                 if not tok.alive then break end
+
+                -- รีเช็คพื้นที่ว่างก่อนวางทุกครั้ง
+                freeNow = __freeTiles(area)
+                if #freeNow == 0 then
+                    Fluent:Notify({ Title = "Auto Place Pet", Content = "พื้นที่ว่างหมดระหว่างการวาง • ปิด Auto Place ให้", Duration = 5 })
+                    pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+                    TaskMgr.stop("AutoPlacePet")
+                    tok.alive = false
+                    break
+                end
+
                 local ok = select(1, placePetOnFreeTile(uid, area, "near-player"))
                 dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
                 task.wait(0.15)
             end
         end
+
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
