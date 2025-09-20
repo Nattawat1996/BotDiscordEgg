@@ -1,6 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
---V2.1
+--V2.1+smartpet
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -445,7 +445,7 @@ Configuration = {
         CollectPet_Type="All", CollectPet_Auto=false, CollectPet_Mutations={}, CollectPet_Pets={},
         CollectPet_Delay=5, CollectPet_Between={Min=100000,Max=1000000}, CollectPet_Area="Any",
         PlacePet_Mode="All", PlacePet_Types={}, PlacePet_Mutations={}, AutoPlacePet_Delay=1.0,
-        PlacePet_Between={Min=0,Max=1000000}, PlaceArea="Any",
+        PlacePet_Between={Min=0,Max=1000000}, PlaceArea="Any",SmartPet = false,
     },
     Egg = {
         AutoHatch=false, Hatch_Delay=15, AutoBuyEgg=false, AutoBuyEgg_Delay=1,
@@ -840,11 +840,127 @@ local function placePetOnFreeTile(uid, area)
     return ok, ok and "placed" or "no confirm"
 end
 
+-- ดึง "สัตว์ที่ยังไม่ถูกวาง" ตามตัวกรอง + income cache
+local function __getFilteredInventoryUidsSortedDesc()
+    local uids = {}
+    for _, node in ipairs(OwnedPetData:GetChildren()) do
+        local uid = node.Name
+        if not Pet_Folder:FindFirstChild(uid) then
+            table.insert(uids, uid)
+        end
+    end
+    if #uids == 0 then return {} end
+
+    -- ใช้ cache เร็วของคุณ
+    local inc = {}
+    for i = 1, #uids do
+        local uid = uids[i]
+        inc[uid] = GetIncomeFast(uid) or 0
+    end
+
+    -- คัดกรองตามโหมด Place
+    uids = __filterPetsForPlacing(uids, inc)
+
+    table.sort(uids, function(a, b) return (inc[a] or 0) > (inc[b] or 0) end)
+    return uids, inc
+end
+
+-- หา "อ่อนสุดที่วางอยู่" ในพื้นที่ที่เลือก (ยกเว้น Big ถ้าต้องการ)
+local function __findWorstPlacedPetInArea(areaWant)
+    local worstUid, worstInc, worstTileKey, worstTilePart
+    for uid, P in pairs(OwnedPets) do
+        -- ข้าม Big ถ้าไม่อยากสลับตัวใหญ่: ปรับเงื่อนไขตามต้องการ
+        -- if P.IsBig then continue end
+        local okArea = true
+        if (areaWant ~= "Any") then
+            okArea = (petArea(uid) == areaWant)
+        end
+        if okArea then
+            local incPlaced = tonumber(P.ProduceSpeed) or 0
+            -- ระบุตำแหน่งกระเบื้องของสัตว์ตัวนี้
+            local gc = P.GridCoord
+            local key
+            if gc then
+                key = _keyXZ(gc.X or 0, gc.Z or 0)
+            else
+                local rp = P.RootPart
+                local pos = rp and rp.Position or Vector3.new()
+                key = _keyXZ(pos.X, pos.Z)
+            end
+            local node = PlotIndex[key]
+            if node then
+                if (worstInc == nil) or (incPlaced < worstInc) then
+                    worstInc, worstUid, worstTileKey, worstTilePart = incPlaced, uid, key, node.part
+                end
+            end
+        end
+    end
+    return worstUid, worstInc or 0, worstTileKey, worstTilePart
+end
+
+-- แทนที่: เก็บตัวเดิม + วางตัวใหม่ทับช่องเดิม
+local function __replacePetAtTile(oldUid, newUid, tilePart)
+    if not tilePart then return false, "no tile" end
+    local dst = __tileCenterPos(tilePart)
+
+    -- เคลมแล้วลบของเดิม
+    local P = OwnedPets[oldUid]
+    if P and P.RE then pcall(function() P.RE:FireServer("Claim") end) end
+    CharacterRE:FireServer("Del", oldUid)
+    task.wait(0.4)
+
+    -- วางตัวใหม่
+    CharacterRE:FireServer("Focus", newUid); task.wait(0.25)
+    CharacterRE:FireServer("Place", { DST = dst, ID = newUid })
+    task.wait(0.7)
+    CharacterRE:FireServer("Focus")
+
+    -- ยืนยันการวาง
+    local ok = Pet_Folder:WaitForChild(newUid, 3) ~= nil
+    return ok, ok and "replaced" or "place-failed"
+end
+
 
 local function runAutoPlacePet(tok)
     while tok.alive do
         local area = Configuration.Pet.PlaceArea or "Any"
-
+        local function __smartPassOnce(limitReplace)
+            if not Configuration.Pet.SmartPet then return end
+            local area = Configuration.Pet.PlaceArea or "Any"
+        
+            -- 1) inventory (ยังไม่ถูกวาง) ที่ผ่านตัวกรอง เรียงจากมากไปน้อย
+            local invUids, incMap = __getFilteredInventoryUidsSortedDesc()
+            if not invUids or #invUids == 0 then return end
+        
+            -- 2) หาเป้าหมายอ่อนสุดที่วางอยู่
+            local tries = 0
+            while tries < (limitReplace or 3) do
+                local worstUid, worstInc, _, worstTilePart = __findWorstPlacedPetInArea(area)
+                if not worstUid then break end
+        
+                -- best inventory ตอนนี้
+                local bestUid = invUids[1]
+                local bestInc = (bestUid and incMap and incMap[bestUid]) or (bestUid and GetIncomeFast(bestUid)) or 0
+        
+                -- ถ้าไม่ดีกว่า ก็จบ
+                if not bestUid or (bestInc <= (worstInc or 0)) then break end
+        
+                -- ลองแทนที่
+                local ok = false
+                if worstTilePart then
+                    ok = select(1, __replacePetAtTile(worstUid, bestUid, worstTilePart))
+                end
+        
+                -- เอาตัวที่ใช้ไปออกจาก inv list
+                table.remove(invUids, 1)
+        
+                -- ถ้าแทนที่สำเร็จนับหนึ่งครั้ง แล้วลองวนต่อ (ไม่เกิน limit)
+                tries += (ok and 1 or 1)  -- นับครั้งไม่ว่าผลจะสำเร็จหรือไม่ เพื่อคุมรอบ
+                if #invUids == 0 then break end
+                task.wait(0.1)
+            end
+        end
+        __smartPassOnce(1)
         -- 1) สร้าง free-list จาก SortedPlots ตามลำดับช่อง (Z->X)
         local freeList = (function()
             local occ = (function() -- occupied keys จาก MyPets_List
@@ -1283,6 +1399,12 @@ Tabs.Pet:AddToggle("Auto Place Pet",{
         if v then TaskMgr.start("AutoPlacePet", runAutoPlacePet)
         else TaskMgr.stop("AutoPlacePet") end
     end
+})
+
+Tabs.Pet:AddToggle("SmartPet", {
+    Title = "SmartPet",
+    Default = false,
+    Callback = function(v) Configuration.Pet.SmartPet = v end
 })
 
 Tabs.Pet:AddButton({
