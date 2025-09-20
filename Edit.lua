@@ -1,6 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
---V2.2
+--V2.1
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -118,6 +118,64 @@ end
 --==============================================================
 --                      HELPERS
 --==============================================================
+-- ==== Income Cache (drop-in) ====
+local IncomeCache = { map = {}, built = false, last = 0 }
+local function _buildIncomeIndex()
+    local pg = Player:FindFirstChild("PlayerGui"); if not pg then return end
+    local s = pg:FindFirstChild("ScreenStorage"); if not s then return end
+    local f = s:FindFirstChild("Frame"); if not f then return end
+    local cp = f:FindFirstChild("ContentPet"); if not cp then return end
+    local sc = cp:FindFirstChild("ScrollingFrame"); if not sc then return end
+    IncomeCache.map = {}
+    for _, item in ipairs(sc:GetChildren()) do
+        local uid = item.Name
+        local btn  = item:FindFirstChild("BTN") or item:FindFirstChildWhichIsA("Frame")
+        local stat = btn and (btn:FindFirstChild("Stat") or btn:FindFirstChildWhichIsA("Frame"))
+        local price= stat and (stat:FindFirstChild("Price") or stat:FindFirstChildWhichIsA("Frame"))
+        local valueObj = price and price:FindFirstChild("Value")
+        local val
+        if valueObj then
+            if valueObj:IsA("NumberValue") or valueObj:IsA("IntValue") then
+                val = tonumber(valueObj.Value)
+            elseif valueObj:IsA("StringValue") then
+                local s = tostring(valueObj.Value or "")
+                val = tonumber((s:gsub("[^%d%.]","")))
+            end
+        end
+        if not val and price then
+            local function readText(inst)
+                local ok, txt = pcall(function() return inst.Text end)
+                if ok and txt then
+                    local n = tonumber((tostring(txt):gsub("[^%d%.]",""))); if n then return n end
+                end
+            end
+            val = readText(price) or (price:FindFirstChildWhichIsA("TextLabel") and readText(price:FindFirstChildWhichIsA("TextLabel")))
+            if not val then
+                for _, d in ipairs(price:GetDescendants()) do
+                    if d:IsA("TextLabel") or d:IsA("TextButton") then val = readText(d); if val then break end end
+                end
+            end
+        end
+        IncomeCache.map[uid] = tonumber(val or 0) or 0
+    end
+    IncomeCache.last = os.clock()
+    IncomeCache.built = true
+end
+
+local function GetIncomeFast(uid)
+    -- ถ้าแคชเก่ากว่า 5 วินาที ค่อย rebuild หนึ่งครั้ง (กัน stale นานเกิน)
+    if not IncomeCache.built or (os.clock() - IncomeCache.last > 5) then
+        pcall(_buildIncomeIndex)
+    end
+    local v = IncomeCache.map[uid]
+    if v == nil then
+        -- fallback ครั้งเดียว: ดึงสดเฉพาะตัวนี้ แล้วเก็บเข้าคลัง
+        v = GetInventoryIncomePerSecByUID(uid)
+        IncomeCache.map[uid] = v or 0
+    end
+    return v or 0
+end
+
 --==============================================================
 --  MY PETS (workspace.Pets ของเราเท่านั้น)
 --  วางไว้ใกล้ ๆ ส่วนประกาศ Services/Globals หลังจากมี PlayerUserID
@@ -537,14 +595,35 @@ local function _applyEffectInst(inst, enable)
     end
 end
 
+local function _applyEffectInst_batch(list, enable)
+    -- ทำเป็นก้อนละ 300 ชิ้น ต่อเฟรม
+    local batch, n = 300, #list
+    local i = 1
+    while i <= n do
+        local j = math.min(i + batch - 1, n)
+        for k = i, j do _applyEffectInst(list[k], enable) end
+        i = j + 1
+        task.wait() -- yield หน่อย ลดแข็ง
+    end
+end
+
 local function ApplyHideEffects(on)
-    for _,d in ipairs(workspace:GetDescendants()) do _applyEffectInst(d, not on) end
     if _effectsConn then _effectsConn:Disconnect(); _effectsConn = nil end
+    -- เก็บรายการก่อน แล้วค่อย apply แบบ batch
+    local all = {}
+    for _,d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("ParticleEmitter") or d:IsA("Beam") or d:IsA("Trail") or d:IsA("Highlight") or d:IsA("Explosion") then
+            table.insert(all, d)
+        end
+    end
+    _applyEffectInst_batch(all, not on)
+
     if on then
         _effectsConn = workspace.DescendantAdded:Connect(function(d) _applyEffectInst(d, false) end)
         table.insert(EnvirontmentConnections, _effectsConn)
     end
 end
+
 local function ApplyHideGameUI(on)
     local pg = Player:FindFirstChild("PlayerGui"); if not pg then return end
     local fluentGui = (Fluent and Fluent.GuiObject) or (Fluent and Fluent.ScreenGui) or (Fluent and Fluent.Root) or nil
@@ -748,13 +827,40 @@ local function placePetOnFreeTile(uid, area, pickMode)
     return ok, ok and "placed" or "no confirm"
 end
 
--- == Runner: Auto Place Pet (ใช้ UI เดิมทั้งหมด)
 local function runAutoPlacePet(tok)
     while tok.alive do
         local area = Configuration.Pet.PlaceArea or "Any"
 
-        -- 1) free-list ครั้งเดียวตอนเริ่มรอบ
-        local freeList = __buildFreeList(area)
+        -- 1) สร้าง free-list จาก SortedPlots ตามลำดับช่อง (Z->X)
+        local freeList = (function()
+            local occ = (function() -- occupied keys จาก MyPets_List
+                local keys = {}
+                for _, m in ipairs(MyPets_List) do
+                    local root = m.PrimaryPart or m:FindFirstChild("RootPart")
+                    local gcp = root and root:GetAttribute("GridCenterPos") or m:GetAttribute("GridCenterPos")
+                    if gcp then
+                        local v = typeof(gcp)=="Vector3" and gcp or Vector3.new(
+                            gcp.X or gcp.x or gcp[1] or 0,
+                            gcp.Y or gcp.y or gcp[2] or 0,
+                            gcp.Z or gcp.z or gcp[3] or 0
+                        )
+                        keys[_keyXZ(v.X, v.Z)] = true
+                    end
+                end
+                return keys
+            end)()
+            local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
+            local free = {}
+            for i = 1, #pool do
+                local part = pool[i]
+                local k = _keyXZ(part.Position.X, part.Position.Z)
+                if not occ[k] then
+                    free[#free+1] = { part = part, pos = part.Position, key = k }
+                end
+            end
+            return free
+        end)()
+
         if #freeList == 0 then
             Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างให้วางสัตว์แล้ว • ปิด Auto Place ให้", Duration = 5 })
             pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
@@ -762,7 +868,7 @@ local function runAutoPlacePet(tok)
             break
         end
 
-        -- 2) หารายชื่อสัตว์ที่ยังไม่ถูกวาง
+        -- 2) รวบรวม UID ที่ยังไม่ถูกวาง
         local uids = {}
         for _, petNode in ipairs(OwnedPetData:GetChildren()) do
             local uid = petNode.Name
@@ -772,26 +878,47 @@ local function runAutoPlacePet(tok)
         end
 
         if #uids > 0 then
-            -- 3) แคช income/s ครบทุก uid ครั้งเดียว
+            -- 3) cache income/s เพียงครั้งเดียว
             local inc_by_uid = {}
             for i = 1, #uids do
                 local uid = uids[i]
-                inc_by_uid[uid] = GetInventoryIncomePerSecByUID(uid) or 0
+                inc_by_uid[uid] = GetIncomeFast(uid)
             end
 
-            -- 4) sort โดยใช้แคช (ไม่อ่าน GUI ใน comparator)
+            -- 4) sort โดยใช้ cache
             table.sort(uids, function(a,b)
                 return (inc_by_uid[a] or 0) > (inc_by_uid[b] or 0)
             end)
 
-            -- 5) คัดกรองตามโหมด โดยส่ง inc_by_uid เข้าไป
-            uids = __filterPetsForPlacing(uids, inc_by_uid)
+            -- 5) คัดกรองตามโหมด (ใช้ cache)
+            uids = (function(list, inc_map)
+                local mode = Configuration.Pet.PlacePet_Mode or "All"
+                if mode == "All" then return list end
+                local out = {}
+                for _, uid in ipairs(list) do
+                    local petNode = OwnedPetData:FindFirstChild(uid)
+                    if petNode then
+                        if mode == "Match" then
+                            local t = petNode:GetAttribute("T")
+                            local m = petNode:GetAttribute("M") or "None"
+                            if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
+                                out[#out+1] = uid
+                            end
+                        elseif mode == "Range" then
+                            local inc = inc_map and inc_map[uid]
+                            if inc == nil then inc = GetInventoryIncomePerSecByUID(uid) end
+                            local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
+                            local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
+                            if inc >= mn and inc <= mx then
+                                out[#out+1] = uid
+                            end
+                        end
+                    end
+                end
+                return out
+            end)(uids, inc_by_uid)
 
-            -- 6) เตรียมตำแหน่งผู้เล่นสำหรับ near-player เพียงครั้งเดียว
-            local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-            local hrpPos = hrp and hrp.Position or nil
-
-            -- 7) วางทีละตัว: หยิบ index จาก freeList แล้วลบช่องที่ใช้ไป
+            -- 6) วางตามลำดับช่อง: ใช้ช่องแรกใน freeList แล้ว pop ออก
             for _, uid in ipairs(uids) do
                 if not tok.alive then break end
                 if #freeList == 0 then
@@ -802,11 +929,7 @@ local function runAutoPlacePet(tok)
                     break
                 end
 
-                local pickMode = "near-player"
-                local idx, node = __pickIndexFromFreeList(freeList, pickMode, hrpPos)
-                if not idx or not node then break end
-
-                -- ส่งคำสั่งวาง
+                local idx, node = 1, freeList[1]  -- <<--- เรียงตามช่อง (ไม่ NearPlayer)
                 task.wait(0.15)
                 CharacterRE:FireServer("Focus", uid)
                 task.wait(0.25)
@@ -816,10 +939,7 @@ local function runAutoPlacePet(tok)
 
                 local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
                 dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
-
-                -- ใช้ช่องนี้แล้ว ก็ลบทิ้งจาก free-list (ป้องกัน re-scan)
                 if ok then table.remove(freeList, idx) end
-
                 task.wait(0.1)
             end
         end
@@ -827,6 +947,7 @@ local function runAutoPlacePet(tok)
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
+
 
 
 local function runAutoPlaceEgg(tok)
@@ -851,17 +972,19 @@ end
 
 local function runAutoCollect(tok)
     while tok.alive do
-        local claimed = 0
+        local claimed, MAX_PER_TICK = 0, 60  -- เคลมสูงสุดต่อรอบ
         for _, pet in pairs(OwnedPets) do
             if not tok.alive then break end
+            if claimed >= MAX_PER_TICK then break end
             local RE = pet and pet.RE
             if RE then
                 RE:FireServer("Claim")
                 claimed += 1
-                if claimed % 10 == 0 then task.wait() end
+                if claimed % 8 == 0 then task.wait() end
             end
         end
-        if not _waitAlive(tok, tonumber(Configuration.Main.Collect_Delay) or 3) then break end
+        local d = tonumber(Configuration.Main.Collect_Delay) or 3
+        _waitAlive(tok, d + math.random() * 0.25) -- ใส่ jitter เล็กน้อย กัน burst ชนกัน
     end
 end
 
