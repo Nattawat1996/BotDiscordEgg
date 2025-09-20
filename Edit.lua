@@ -118,6 +118,55 @@ end
 --==============================================================
 --                      HELPERS
 --==============================================================
+--==============================================================
+--  MY PETS (workspace.Pets ของเราเท่านั้น)
+--  วางไว้ใกล้ ๆ ส่วนประกาศ Services/Globals หลังจากมี PlayerUserID
+--==============================================================
+local MyPets = {}          -- [Model] = true  (เฉพาะของเรา)
+local MyPets_List = {}     -- อาเรย์ใช้งานสะดวก (อัปเดตอัตโนมัติ)
+
+local function _isOwnedPetModel(model)
+    if not (model and model:IsA("Model")) then return false end
+    -- เช็คจาก Attribute ของตัว Model หรือ RootPart/PrimaryPart
+    local uid = model:GetAttribute("UserId")
+    if uid == PlayerUserID then return true end
+    local root = model.PrimaryPart or model:FindFirstChild("RootPart")
+    if root and root:GetAttribute("UserId") == PlayerUserID then return true end
+    return false
+end
+
+local function _rebuildMyPetsList()
+    -- รีเฟรช MyPets_List จากคีย์ของ MyPets
+    table.clear(MyPets_List)
+    for m in pairs(MyPets) do
+        if m.Parent == workspace.Pets then
+            table.insert(MyPets_List, m)
+        else
+            MyPets[m] = nil
+        end
+    end
+end
+
+local function _addMyPet(m)
+    if _isOwnedPetModel(m) then
+        MyPets[m] = true
+        _rebuildMyPetsList()
+    end
+end
+
+local function _removeMyPet(m)
+    if MyPets[m] then
+        MyPets[m] = nil
+        _rebuildMyPetsList()
+    end
+end
+
+-- preload
+for _,m in ipairs(workspace.Pets:GetChildren()) do _addMyPet(m) end
+-- live update
+workspace.Pets.ChildAdded:Connect(function(m) task.defer(_addMyPet, m) end)
+workspace.Pets.ChildRemoved:Connect(function(m) task.defer(_removeMyPet, m) end)
+
 
 local function _toggleWhiteOverlay(show)
     local pg = Player:FindFirstChild("PlayerGui")
@@ -561,14 +610,6 @@ end
 --            AUTO PLACE PET (GridCenterPos-based)
 --==============================================================
 
---==============================================================
---      AUTO PLACE PET (scan-free-slots → pick top-income pets)
---      - สแกนจำนวนช่องว่างตามพื้นที่ที่ตั้งไว้ก่อน
---      - คัดกรองรายชื่อสัตว์ตาม filter เพียงครั้งเดียว + คำนวณ income/s ครั้งเดียว
---      - เลือกสัตว์ income/s สูงสุดตามจำนวนช่องว่าง แล้ววาง “ทีละตัว”
---      - ไม่วาร์ปตัวละครไปจุดวาง
---==============================================================
-
 -- == local utils ==
 local function __round(n) return math.floor((tonumber(n) or 0) + 0.5) end
 local function __keyXZ(x,z) return string.format("%d,%d", __round(x), __round(z)) end
@@ -593,7 +634,7 @@ local function __parseGCP(v)
     return nil
 end
 
--- == tiles ==
+-- == เก็บ Tile ทั้งหมดของเกาะ (แบ่ง Land/Water, สร้าง keyXZ)
 local function __collectTiles()
     local tiles = {}
     for _,p in ipairs(Island:GetDescendants()) do
@@ -616,43 +657,70 @@ end
 
 local function __occupiedKeysFromPets()
     local keys = {}
-    for _, m in ipairs(workspace.Pets:GetChildren()) do
-        if m:IsA("Model") then
-            local root = m.PrimaryPart or m:FindFirstChild("RootPart")
-            local ma, ra = __getAttrs(m), (root and __getAttrs(root) or {})
-            local gcp = __parseGCP(ra.GridCenterPos or ma.GridCenterPos)
-            if gcp then keys[__keyXZ(gcp.X, gcp.Z)] = true end
+    for _, m in ipairs(MyPets_List) do
+        local root = m.PrimaryPart or m:FindFirstChild("RootPart")
+        local gcp = nil
+        if root then
+            gcp = root:GetAttribute("GridCenterPos")
+        end
+        if not gcp then
+            gcp = m:GetAttribute("GridCenterPos")
+        end
+        if gcp then
+            local v = (typeof(gcp) == "Vector3") and gcp or Vector3.new(gcp.X or gcp.x or gcp[1] or 0, gcp.Y or gcp.y or gcp[2] or 0, gcp.Z or gcp.z or gcp[3] or 0)
+            keys[(__keyXZ(v.X, v.Z))] = true
         end
     end
     return keys
 end
 
-local function __freeTiles(area)
+-- == คืนรายการ Tile ว่างตามพื้นที่ที่ต้องการ
+local function __freeTiles(area) -- "Any"|"Land"|"Water"
     local tiles = __collectTiles()
     local occ   = __occupiedKeysFromPets()
     local free = {}
     for _,t in ipairs(tiles) do
-        if not occ[t.key] and ((area=="Any") or (t.area==area)) then
-            free[#free+1] = t
+        if not occ[t.key] then
+            if (area == "Any") or (t.area == area) then
+                free[#free+1] = t
+            end
         end
     end
     return free
 end
 
--- == pets to place ==
+-- == เลือก tile ว่าง (first / near-player)
+local function __pickFreeTile(area, mode)
+    area = area or "Any"; mode = mode or "near-player"
+    local list = __freeTiles(area)
+    if #list == 0 then return nil end
+    if mode == "first" then return list[1] end
+    local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return list[1] end
+    local best, bestd
+    for _,t in ipairs(list) do
+        local d = (t.pos - hrp.Position).Magnitude
+        if not bestd or d < bestd then best, bestd = t, d end
+    end
+    return best or list[1]
+end
+
+-- == หารายชื่อสัตว์ที่ยัง “ไม่ถูกวาง” (ไม่มีโมเดลใน workspace.Pets)
 local function __getUnplacedPetUIDs()
     local uids = {}
     for _, petNode in ipairs(OwnedPetData:GetChildren()) do
-        if not workspace.Pets:FindFirstChild(petNode.Name) then
-            uids[#uids+1] = petNode.Name
+        if not Pet_Folder:FindFirstChild(petNode.Name) then
+            table.insert(uids, petNode.Name)
         end
     end
     return uids
 end
 
+-- == คัดกรองตามโหมด UI: All / Match / Range
 local function __filterPetsForPlacing(list)
     local mode = Configuration.Pet.PlacePet_Mode or "All"
     if mode == "All" then return list end
+
     local out = {}
     for _, uid in ipairs(list) do
         local petNode = OwnedPetData:FindFirstChild(uid)
@@ -660,87 +728,65 @@ local function __filterPetsForPlacing(list)
             if mode == "Match" then
                 local t = petNode:GetAttribute("T")
                 local m = petNode:GetAttribute("M") or "None"
-                if Configuration.Pet.PlacePet_Types[t] and Configuration.Pet.PlacePet_Mutations[m] then
-                    out[#out+1] = uid
+                if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
+                    table.insert(out, uid)
                 end
             elseif mode == "Range" then
                 local inc = GetInventoryIncomePerSecByUID(uid)
                 local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
                 local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
-                if inc >= mn and inc <= mx then out[#out+1] = uid end
+                if inc >= mn and inc <= mx then
+                    table.insert(out, uid)
+                end
             end
         end
     end
     return out
 end
 
--- คำนวณ income/s ครั้งเดียวและจัดอันดับ
-local function __rankPetsByIncome(uids)
-    local rows = table.create(#uids)
-    for i,uid in ipairs(uids) do
-        rows[i] = { uid = uid, inc = tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0 }
-    end
-    table.sort(rows, function(a,b) return a.inc > b.inc end)
-    return rows
-end
-
--- ส่งคำสั่ง Place (ไม่วาร์ป)
+-- == ส่งคำสั่ง “Place” ไปยังเซิร์ฟเวอร์
 local function __placeOnePetToPos(uid, worldPos)
+    task.wait(0.2)
     CharacterRE:FireServer("Focus", uid)
-    task.wait(0.15)
+    task.wait(0.25)
     CharacterRE:FireServer("Place", { DST = Vector3.new(worldPos.X, worldPos.Y, worldPos.Z), ID = uid })
-    task.wait(0.15)
+    task.wait(1)
     CharacterRE:FireServer("Focus")
-    local ok = workspace.Pets:WaitForChild(uid, 3) ~= nil
+    local ok = Pet_Folder:WaitForChild(uid, 3) ~= nil
     return ok
 end
 
--- เลือก N ตัวบนสุดตามจำนวนช่องว่าง และวาง “ทีละตัว”
-local function __placeTopPetsInFreeSlots(area)
-    area = area or (Configuration.Pet.PlaceArea or "Any")
-
-    -- 1) สแกนช่องว่างก่อน
-    local freeTiles = __freeTiles(area)
-    local slots = #freeTiles
-    if slots == 0 then return 0, 0 end
-
-    -- 2) กรอง + จัดอันดับสัตว์เพียงครั้งเดียว
-    local unplaced = __getUnplacedPetUIDs()
-    if #unplaced == 0 then return 0, 0 end
-    local filtered = __filterPetsForPlacing(unplaced)
-    if #filtered == 0 then return 0, 0 end
-    local ranked = __rankPetsByIncome(filtered)
-
-    -- 3) เลือกจำนวน = slots (หรือจำนวนน้อยกว่าถ้า ranked ไม่พอ)
-    local take = math.min(slots, #ranked)
-    local placed, failed = 0, 0
-
-    for i = 1, take do
-        local uid = ranked[i].uid
-        local tile = freeTiles[i]     -- ใช้ลำดับเดียวกันเพื่อหลีกเลี่ยงสแกนซ้ำ
-        if not tile then break end     -- กันพลาดเผื่อ freeTiles เปลี่ยนทันที
-
-        local ok = __placeOnePetToPos(uid, tile.pos)
-        if ok then placed += 1 else failed += 1 end
-
-        -- วางได้ “ทีละตัว” แน่นอน: รอคอนเฟิร์มเสมอแล้วค่อยไปตัวถัดไป
-        task.wait(0.1)
-    end
-
-    return placed, failed
+-- == วางสัตว์ตัวเดียวลง tile ว่าง (คืนค่า: ok, msg)
+local function placePetOnFreeTile(uid, area, pickMode)
+    if not uid or uid == "" then return false, "no uid" end
+    local tile = __pickFreeTile(area or Configuration.Pet.PlaceArea or "Any", pickMode or "near-player")
+    if not tile then return false, "no free tile" end
+    local ok = __placeOnePetToPos(uid, tile.pos)
+    return ok, ok and "placed" or "no confirm"
 end
 
---== Runner ==
+-- == Runner: Auto Place Pet (ใช้ UI เดิมทั้งหมด)
 local function runAutoPlacePet(tok)
     while tok.alive do
-        local placed, failed = __placeTopPetsInFreeSlots(Configuration.Pet.PlaceArea or "Any")
-        dprint(("[AutoPlacePet] cycle -> placed=%d failed=%d"):format(placed, failed))
+        local area = Configuration.Pet.PlaceArea or "Any"
+        local uids = __getUnplacedPetUIDs()
+        if #uids > 0 then
+            -- เรียงตาม income/s สูงไปต่ำ เพื่อให้ช่องดีๆได้ตัวคุ้มก่อน
+            table.sort(uids, function(a,b)
+                return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
+            end)
+            uids = __filterPetsForPlacing(uids)
+
+            for _, uid in ipairs(uids) do
+                if not tok.alive then break end
+                local ok = select(1, placePetOnFreeTile(uid, area, "near-player"))
+                dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
+                task.wait(0.15)
+            end
+        end
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
-
-
-
 
 local function runAutoPlaceEgg(tok)
     dprint("[AutoPlaceEgg] temporarily disabled (stub).")
