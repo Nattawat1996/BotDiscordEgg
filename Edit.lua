@@ -1,7 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
--- Reorganized + Optimized version (legacy-friendly place logic)
--- (Auto Place Pet/Egg code removed; stubs kept for wiring)
+--V2.1
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -772,32 +771,31 @@ local function placePetOnFreeTile(uid, area)
 end
 
 -- ====== runner (optimized) ======
+-- drop-in แทน runAutoPlacePet เดิม
 local function runAutoPlacePet(tok)
+    -- หมายเหตุ: ใช้ __buildTiles/__rebuildOccupied/__pickFree/__getUnplacedPetUIDs/__filterForPlacing ที่มีอยู่แล้ว
     while tok.alive do
-        local area = Configuration.Pet.PlaceArea or "Any"
+        -- 1) เลือกตัวถัดไปที่จะวาง
         local uids = __getUnplacedPetUIDs()
         if #uids > 0 then
+            -- จัดลำดับก่อน (เร็ว→ช้า)
             table.sort(uids, function(a,b)
                 return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
             end)
             uids = __filterForPlacing(uids)
 
-            -- cap ต่อรอบเพื่อลด lag
-            local placedThisTick, CAP = 0, 6
-            for _,uid in ipairs(uids) do
-                if not tok.alive then break end
-                if placedThisTick >= CAP then break end
+            -- 2) วาง “เพียงตัวเดียว” ต่อรอบ
+            local uid = uids[1]
+            if uid then
+                local area = Configuration.Pet.PlaceArea or "Any"
                 local tile = __pickFree(area)
-                if not tile then break end
-                local ok = __placeOne(uid, tile.pos)
-                if ok then
-                    __occupied[tile.key] = true
-                    __uid2key[uid] = tile.key
-                    placedThisTick += 1
+                if tile then
+                    __placeOneStrict(uid, tile)  -- รอคอนเฟิร์มก่อนจบรอบ
                 end
-                task.wait(0.06)
             end
         end
+
+        -- 3) หน่วงรอบ (ควร >= 0.5s หากมีดีเลย์เซิร์ฟเวอร์)
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
