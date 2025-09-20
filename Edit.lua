@@ -562,188 +562,201 @@ end
 --            AUTO PLACE PET (GridCenterPos-based)
 --==============================================================
 
--- == local utils ==
+local __tilesAll, __tilesLand, __tilesWater = {}, {}, {}
+local __rot = { Any = 1, Land = 1, Water = 1 }
+local __occupied = {}          -- keyXZ -> true
+local __uid2key = {}           -- uid   -> keyXZ
+
+-- ====== utils ======
 local function __round(n) return math.floor((tonumber(n) or 0) + 0.5) end
 local function __keyXZ(x,z) return string.format("%d,%d", __round(x), __round(z)) end
-
-local function __getAttrs(inst)
-    local ok, a = pcall(function() return inst:GetAttributes() end)
-    return ok and a or {}
-end
+local function __getAttrs(inst) local ok,a=pcall(function() return inst:GetAttributes() end) return ok and a or {} end
 
 local function __parseGCP(v)
-    if typeof(v) == "Vector3" then return v end
-    if type(v) == "table" then
-        local x = v.X or v.x or v[1] or 0
-        local y = v.Y or v.y or v[2] or 0
-        local z = v.Z or v.z or v[3] or 0
+    if typeof(v)=="Vector3" then return v end
+    if type(v)=="table" then
+        local x=v.X or v.x or v[1] or 0
+        local y=v.Y or v.y or v[2] or 0
+        local z=v.Z or v.z or v[3] or 0
         return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
     end
-    if type(v) == "string" then
-        local x,y,z = v:match("%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*")
+    if type(v)=="string" then
+        local x,y,z=v:match("%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)")
         return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
     end
     return nil
 end
 
-local function __ensureNear(position)
-    local c = Player.Character
-    local root = c and c:FindFirstChild("HumanoidRootPart")
-    if root then root.CFrame = CFrame.new(position + Vector3.new(0,3,0)) end
-end
-
--- == เก็บ Tile ทั้งหมดของเกาะ (แบ่ง Land/Water, สร้าง keyXZ)
-local function __collectTiles()
-    local tiles = {}
+-- ====== tiles build once ======
+local function __buildTiles()
+    __tilesAll, __tilesLand, __tilesWater = {}, {}, {}
     for _,p in ipairs(Island:GetDescendants()) do
         if p:IsA("BasePart") and (p.Name:match("^Farm_split_") or p.Name:match("^WaterFarm_split_")) then
             local area = p.Name:match("^Water") and "Water" or "Land"
-            tiles[#tiles+1] = {
-                part = p,
-                pos  = p.Position,
-                area = area,
-                key  = __keyXZ(p.Position.X, p.Position.Z),
-            }
+            local node = { part=p, pos=p.Position, area=area, key=__keyXZ(p.Position.X,p.Position.Z) }
+            table.insert(__tilesAll, node)
+            if area=="Land" then table.insert(__tilesLand, node) else table.insert(__tilesWater, node) end
         end
     end
-    table.sort(tiles, function(a,b)
-        if a.pos.Z ~= b.pos.Z then return a.pos.Z < b.pos.Z end
-        return a.pos.X < b.pos.X
-    end)
-    return tiles
+    local function _sort(t)
+        table.sort(t, function(a,b)
+            if a.pos.Z ~= b.pos.Z then return a.pos.Z < b.pos.Z end
+            return a.pos.X < b.pos.X
+        end)
+    end
+    _sort(__tilesAll); _sort(__tilesLand); _sort(__tilesWater)
+    __rot.Any, __rot.Land, __rot.Water = 1,1,1
 end
 
--- == set ตำแหน่งที่ถูกยึดจากสัตว์ (อ้างอิง GridCenterPos)
-local function __occupiedKeysFromPets()
-    local keys = {}
-    for _, m in ipairs(Pet_Folder:GetChildren()) do
-        if m:IsA("Model") then
+-- ====== occupied init & live update ======
+local function __mark(uid, key, on)
+    if not key then return end
+    if on then __occupied[key] = true; __uid2key[uid] = key
+    else __occupied[key] = nil; __uid2key[uid] = nil end
+end
+
+local function __rebuildOccupied()
+    table.clear(__occupied); table.clear(__uid2key)
+    for _,m in ipairs(Pet_Folder:GetChildren()) do
+        if m:IsA("Model") and m:GetAttribute("UserId")==PlayerUserID then
             local root = m.PrimaryPart or m:FindFirstChild("RootPart")
             local ma, ra = __getAttrs(m), (root and __getAttrs(root) or {})
             local gcp = __parseGCP(ra.GridCenterPos or ma.GridCenterPos)
-            if gcp then
-                keys[__keyXZ(gcp.X, gcp.Z)] = true
-            end
+            if gcp then __mark(tostring(m), __keyXZ(gcp.X,gcp.Z), true) end
         end
     end
-    return keys
 end
 
--- == คืนรายการ Tile ว่างตามพื้นที่ที่ต้องการ
-local function __freeTiles(area) -- "Any"|"Land"|"Water"
-    local tiles = __collectTiles()
-    local occ   = __occupiedKeysFromPets()
-    local free = {}
-    for _,t in ipairs(tiles) do
-        if not occ[t.key] then
-            if (area == "Any") or (t.area == area) then
-                free[#free+1] = t
-            end
-        end
-    end
-    return free
-end
+-- live hooks (นุ่ม ๆ กัน race)
+table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(function(m)
+    task.defer(function()
+        if not (m and m:IsA("Model")) then return end
+        if m:GetAttribute("UserId") ~= PlayerUserID then return end
+        local root = m.PrimaryPart or m:FindFirstChild("RootPart")
+        local ma, ra = __getAttrs(m), (root and __getAttrs(root) or {})
+        local gcp = __parseGCP(ra.GridCenterPos or ma.GridCenterPos)
+        if gcp then __mark(tostring(m), __keyXZ(gcp.X,gcp.Z), true) end
+    end)
+end))
+table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(function(m)
+    task.defer(function()
+        if not m then return end
+        local uid = tostring(m)
+        local key = __uid2key[uid]
+        __mark(uid, key, false)
+    end)
+end))
 
--- == เลือก tile ว่าง (first / near-player)
-local function __pickFreeTile(area, mode)
-    area = area or "Any"; mode = mode or "near-player"
-    local list = __freeTiles(area)
+__buildTiles()
+__rebuildOccupied()
+
+-- ====== pick free tile with rotating pointer (O(1) amortized) ======
+local function __pickFree(area)
+    local list, rotKey =
+        (area=="Land" and __tilesLand) or (area=="Water" and __tilesWater) or __tilesAll,
+        (area=="Land" and "Land") or (area=="Water" and "Water") or "Any"
     if #list == 0 then return nil end
-    if mode == "first" then return list[1] end
-    local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return list[1] end
-    local best, bestd
-    for _,t in ipairs(list) do
-        local d = (t.pos - hrp.Position).Magnitude
-        if not bestd or d < bestd then best, bestd = t, d end
-    end
-    return best or list[1]
+    local start = __rot[rotKey]
+    if start > #list then start = 1 end
+    local i = start
+    repeat
+        local t = list[i]
+        if t and not __occupied[t.key] then
+            __rot[rotKey] = (i % #list) + 1
+            return t
+        end
+        i = (i % #list) + 1
+    until i == start
+    return nil
 end
 
--- == หารายชื่อสัตว์ที่ยัง “ไม่ถูกวาง” (ไม่มีโมเดลใน workspace.Pets)
+-- ====== unplaced pet list ======
 local function __getUnplacedPetUIDs()
     local uids = {}
-    for _, petNode in ipairs(OwnedPetData:GetChildren()) do
-        if not Pet_Folder:FindFirstChild(petNode.Name) then
-            table.insert(uids, petNode.Name)
+    for _, node in ipairs(OwnedPetData:GetChildren()) do
+        if not Pet_Folder:FindFirstChild(node.Name) then
+            uids[#uids+1] = node.Name
         end
     end
     return uids
 end
 
--- == คัดกรองตามโหมด UI: All / Match / Range
-local function __filterPetsForPlacing(list)
+-- ====== filter by UI (All/Match/Range) ======
+local function __filterForPlacing(uids)
     local mode = Configuration.Pet.PlacePet_Mode or "All"
-    if mode == "All" then return list end
-
+    if mode == "All" then return uids end
     local out = {}
-    for _, uid in ipairs(list) do
-        local petNode = OwnedPetData:FindFirstChild(uid)
-        if petNode then
-            if mode == "Match" then
-                local t = petNode:GetAttribute("T")
-                local m = petNode:GetAttribute("M") or "None"
-                if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
-                    table.insert(out, uid)
+    for _,uid in ipairs(uids) do
+        local node = OwnedPetData:FindFirstChild(uid)
+        if node then
+            if mode=="Match" then
+                local t = node:GetAttribute("T")
+                local m = node:GetAttribute("M") or "None"
+                if Configuration.Pet.PlacePet_Types[t] and Configuration.Pet.PlacePet_Mutations[m] then
+                    out[#out+1] = uid
                 end
-            elseif mode == "Range" then
+            elseif mode=="Range" then
                 local inc = GetInventoryIncomePerSecByUID(uid)
                 local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
                 local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
-                if inc >= mn and inc <= mx then
-                    table.insert(out, uid)
-                end
+                if inc >= mn and inc <= mx then out[#out+1] = uid end
             end
         end
     end
     return out
 end
 
--- == ส่งคำสั่ง “Place” ไปยังเซิร์ฟเวอร์
-local function __placeOnePetToPos(uid, worldPos)
-    __ensureNear(worldPos)
-    task.wait(0.2)
+-- ====== place (no TP) ======
+local function __placeOne(uid, dstVec3)
     CharacterRE:FireServer("Focus", uid)
-    task.wait(0.25)
-    CharacterRE:FireServer("Place", { DST = Vector3.new(worldPos.X, worldPos.Y, worldPos.Z), ID = uid })
-    task.wait(0.2)
+    task.wait(0.12)
+    CharacterRE:FireServer("Place", { DST = Vector3.new(dstVec3.X, dstVec3.Y, dstVec3.Z), ID = uid })
+    task.wait(0.10)
     CharacterRE:FireServer("Focus")
-    local ok = Pet_Folder:WaitForChild(uid, 3) ~= nil
+    local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
     return ok
 end
 
--- == วางสัตว์ตัวเดียวลง tile ว่าง (คืนค่า: ok, msg)
-local function placePetOnFreeTile(uid, area, pickMode)
-    if not uid or uid == "" then return false, "no uid" end
-    local tile = __pickFreeTile(area or Configuration.Pet.PlaceArea or "Any", pickMode or "near-player")
+-- ====== public: place single on free tile ======
+local function placePetOnFreeTile(uid, area)
+    if not uid or uid=="" then return false, "no uid" end
+    local tile = __pickFree(area or Configuration.Pet.PlaceArea or "Any")
     if not tile then return false, "no free tile" end
-    local ok = __placeOnePetToPos(uid, tile.pos)
+    local ok = __placeOne(uid, tile.pos)
+    if ok then __occupied[tile.key] = true; __uid2key[uid] = tile.key end
     return ok, ok and "placed" or "no confirm"
 end
 
--- == Runner: Auto Place Pet (ใช้ UI เดิมทั้งหมด)
+-- ====== runner (optimized) ======
 local function runAutoPlacePet(tok)
     while tok.alive do
         local area = Configuration.Pet.PlaceArea or "Any"
         local uids = __getUnplacedPetUIDs()
         if #uids > 0 then
-            -- เรียงตาม income/s สูงไปต่ำ เพื่อให้ช่องดีๆได้ตัวคุ้มก่อน
             table.sort(uids, function(a,b)
                 return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
             end)
-            uids = __filterPetsForPlacing(uids)
+            uids = __filterForPlacing(uids)
 
-            for _, uid in ipairs(uids) do
+            -- cap ต่อรอบเพื่อลด lag
+            local placedThisTick, CAP = 0, 6
+            for _,uid in ipairs(uids) do
                 if not tok.alive then break end
-                local ok = select(1, placePetOnFreeTile(uid, area, "near-player"))
-                dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
-                task.wait(0.15)
+                if placedThisTick >= CAP then break end
+                local tile = __pickFree(area)
+                if not tile then break end
+                local ok = __placeOne(uid, tile.pos)
+                if ok then
+                    __occupied[tile.key] = true
+                    __uid2key[uid] = tile.key
+                    placedThisTick += 1
+                end
+                task.wait(0.06)
             end
         end
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
-
 
 local function runAutoPlaceEgg(tok)
     dprint("[AutoPlaceEgg] temporarily disabled (stub).")
