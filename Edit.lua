@@ -869,28 +869,25 @@ end
 local function __findWorstPlacedPetInArea(areaWant)
     local worstUid, worstInc, worstTileKey, worstTilePart
     for uid, P in pairs(OwnedPets) do
-        -- ข้าม Big ถ้าไม่อยากสลับตัวใหญ่: ปรับเงื่อนไขตามต้องการ
-        -- if P.IsBig then continue end
-        local okArea = true
-        if (areaWant ~= "Any") then
-            okArea = (petArea(uid) == areaWant)
-        end
-        if okArea then
-            local incPlaced = tonumber(P.ProduceSpeed) or 0
-            -- ระบุตำแหน่งกระเบื้องของสัตว์ตัวนี้
-            local gc = P.GridCoord
-            local key
-            if gc then
-                key = _keyXZ(gc.X or 0, gc.Z or 0)
-            else
-                local rp = P.RootPart
-                local pos = rp and rp.Position or Vector3.new()
-                key = _keyXZ(pos.X, pos.Z)
-            end
-            local node = PlotIndex[key]
-            if node then
-                if (worstInc == nil) or (incPlaced < worstInc) then
-                    worstInc, worstUid, worstTileKey, worstTilePart = incPlaced, uid, key, node.part
+        -- ข้าม Big Pet
+        if P and not P.IsBig then
+            local okArea = (areaWant == "Any") or (petArea(uid) == areaWant)
+            if okArea then
+                local incPlaced = tonumber(P.ProduceSpeed) or 0
+                local gc = P.GridCoord
+                local key
+                if gc then
+                    key = _keyXZ(gc.X or 0, gc.Z or 0)
+                else
+                    local rp = P.RootPart
+                    local pos = rp and rp.Position or Vector3.new()
+                    key = _keyXZ(pos.X, pos.Z)
+                end
+                local node = PlotIndex[key]
+                if node then
+                    if (worstInc == nil) or (incPlaced < worstInc) then
+                        worstInc, worstUid, worstTileKey, worstTilePart = incPlaced, uid, key, node.part
+                    end
                 end
             end
         end
@@ -900,22 +897,22 @@ end
 
 -- แทนที่: เก็บตัวเดิม + วางตัวใหม่ทับช่องเดิม
 local function __replacePetAtTile(oldUid, newUid, tilePart)
+    local Pold = OwnedPets[oldUid]
+    if Pold and Pold.IsBig then
+        return false, "skip-big"   -- ไม่แตะ Big
+    end
     if not tilePart then return false, "no tile" end
     local dst = __tileCenterPos(tilePart)
 
-    -- เคลมแล้วลบของเดิม
-    local P = OwnedPets[oldUid]
-    if P and P.RE then pcall(function() P.RE:FireServer("Claim") end) end
+    if Pold and Pold.RE then pcall(function() Pold.RE:FireServer("Claim") end) end
     CharacterRE:FireServer("Del", oldUid)
     task.wait(0.4)
 
-    -- วางตัวใหม่
     CharacterRE:FireServer("Focus", newUid); task.wait(0.25)
     CharacterRE:FireServer("Place", { DST = dst, ID = newUid })
     task.wait(0.7)
     CharacterRE:FireServer("Focus")
 
-    -- ยืนยันการวาง
     local ok = Pet_Folder:WaitForChild(newUid, 3) ~= nil
     return ok, ok and "replaced" or "place-failed"
 end
