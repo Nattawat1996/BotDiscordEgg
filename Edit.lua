@@ -1267,16 +1267,16 @@ local Window = Fluent:CreateWindow({
 -- วาง Home เป็นแท็บแรก (จะขึ้นบนสุด)
 local Home = Window:AddTab({ Title = "Home", Icon = "home" })
 local Tabs = {
-    Main = Window:AddTab({ Title = "Main Features", Icon = "monitor-check" }),
-    Pet = Window:AddTab({ Title = "Pet Features", Icon = "paw-print" }),
+    Main = Window:AddTab({ Title = "Main Features", Icon = "activity" }),
+    Pet = Window:AddTab({ Title = "Pet Features", Icon = "panda" }),
     Egg = Window:AddTab({ Title = "Egg Features", Icon = "egg" }),
     Shop = Window:AddTab({ Title = "Shop Features", Icon = "shopping-cart" }),
-    Event = Window:AddTab({ Title = "Event Feature", Icon = "bookmark-check" }),
-    Players = Window:AddTab({ Title = "Players Features", Icon = "shield-user" }),
-    Sell = Window:AddTab({ Title = "Sell Features", Icon = "badge-dollar-sign" }),
-    Inv = Window:AddTab({ Title = "Inventory", Icon = "archive" }),
+    Event = Window:AddTab({ Title = "Event Feature", Icon = "bookmark" }),
+    Players = Window:AddTab({ Title = "Players Features", Icon = "user" }),
+    Sell = Window:AddTab({ Title = "Sell Features", Icon = "zap" }),
+    Inv = Window:AddTab({ Title = "Inventory", Icon = "inbox" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
-    About = Window:AddTab({ Title = "badge-info" }),
+    About = Window:AddTab({ Title = "About",Icon = "smile" }),
 }
     Options = Fluent.Options
 
@@ -2276,3 +2276,5 @@ Window.Root.Destroying:Once(function()
     end
     Perf_Set3DEnabled(true)
 end)
+
+
