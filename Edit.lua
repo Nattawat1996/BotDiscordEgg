@@ -178,18 +178,17 @@ local PetHabitatCache = {}
 local ResPetDatabase = require(InGameConfig:WaitForChild("ResPet"))
 
 local function GetPetHabitat(petTypeName)
-    if not petTypeName then return "Land" end -- ถ้าไม่มีชื่อ ให้ถือว่าเป็นสัตว์บก
+    if not petTypeName then return "Land" end
+    
     if PetHabitatCache[petTypeName] then return PetHabitatCache[petTypeName] end
 
-    local petData = ResPetDatabase.__index and ResPetDatabase.__index[petTypeName]
+    local petData = ResPetDatabase[petTypeName]
     
-    -- ใช้ข้อมูลที่คุณค้นพบ!
     if petData and petData.Category == "Ocean" then
         PetHabitatCache[petTypeName] = "Water"
         return "Water"
     end
 
-    -- สัตว์อื่นๆ ที่ไม่ใช่ Ocean ให้ถือว่าเป็นสัตว์บก
     PetHabitatCache[petTypeName] = "Land"
     return "Land"
 end
@@ -200,21 +199,20 @@ local ResEggDatabase = require(InGameConfig:WaitForChild("ResEgg"))
 
 local function GetEggHabitat(eggTypeName)
     if not eggTypeName then return "Land" end
+
     if EggHabitatCache[eggTypeName] then return EggHabitatCache[eggTypeName] end
 
-    local eggData = ResEggDatabase.__index and ResEggDatabase.__index[eggTypeName]
+    local eggData = ResEggDatabase[eggTypeName]
     
-    -- ใช้หลักการเดียวกับสัตว์เลี้ยง: ตรวจสอบ Category
     if eggData and eggData.Category == "Ocean" then
         EggHabitatCache[eggTypeName] = "Water"
         return "Water"
     end
 
-    -- ไข่ใบอื่นๆ ที่ไม่ใช่ Ocean ให้ถือว่าเป็นไข่ของสัตว์บก
     EggHabitatCache[eggTypeName] = "Land"
     return "Land"
 end
--- =========================================================================
+-- =====================================================================
 
 --==============================================================
 --  MY PETS (workspace.Pets ของเราเท่านั้น)
