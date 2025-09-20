@@ -698,33 +698,29 @@ end
 -- วางตามจำนวน “ช่องว่างที่สแกนไว้” โดยไม่ต้องสแกน income/s เกินจำเป็น
 local function runAutoPlacePet(tok)
     while tok.alive do
-        local area = Configuration.Pet.PlaceArea or "Any"
-
-        -- 1) สแกนหาช่องว่างก่อน (ครั้งเดียว)
+        local area      = Configuration.Pet.PlaceArea or "Any"
         local freeTiles = __freeTiles(area)
         local freeCount = #freeTiles
-        if freeCount == 0 then
-            if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
-            goto continue
+
+        if freeCount > 0 then
+            local wantUIDs = __pickPetUIDsForFreeSlots(freeCount)
+            local limit    = math.min(#wantUIDs, freeCount)
+
+            for i = 1, limit do
+                if not tok.alive then break end
+                local uid  = wantUIDs[i]
+                local tile = freeTiles[i]
+                if tile then
+                    local ok = __placeOnePetToPos(uid, tile.pos)
+                    dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
+                    task.wait(0.12)
+                end
+            end
         end
 
-        -- 2) เลือกสัตว์ “ตาม filter” และ “จำกัดจำนวน = ช่องว่าง”
-        local wantUIDs = __pickPetUIDsForFreeSlots(freeCount)
-
-        -- 3) วาง: จับคู่ uid กับ tile ตำแหน่งตามลำดับ
-        local placed = 0
-        for i, uid in ipairs(wantUIDs) do
-            if not tok.alive then break end
-            local tile = freeTiles[i]
-            if not tile then break end
-            local ok = __placeOnePetToPos(uid, tile.pos)
-            dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
-            if ok then placed += 1 end
-            task.wait(0.12)
+        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then
+            break
         end
-
-        ::continue::
-        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
     end
 end
 
