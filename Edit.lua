@@ -173,6 +173,49 @@ local function GetIncomeFast(uid)
     return v or 0
 end
 
+-- ================== เพิ่มฟังก์ชัน Helper สำหรับตรวจสอบประเภทสัตว์ ==================
+local PetHabitatCache = {}
+local ResPetDatabase = require(InGameConfig:WaitForChild("ResPet"))
+
+local function GetPetHabitat(petTypeName)
+    if not petTypeName then return "Land" end -- ถ้าไม่มีชื่อ ให้ถือว่าเป็นสัตว์บก
+    if PetHabitatCache[petTypeName] then return PetHabitatCache[petTypeName] end
+
+    local petData = ResPetDatabase.__index and ResPetDatabase.__index[petTypeName]
+    
+    -- ใช้ข้อมูลที่คุณค้นพบ!
+    if petData and petData.Category == "Ocean" then
+        PetHabitatCache[petTypeName] = "Water"
+        return "Water"
+    end
+
+    -- สัตว์อื่นๆ ที่ไม่ใช่ Ocean ให้ถือว่าเป็นสัตว์บก
+    PetHabitatCache[petTypeName] = "Land"
+    return "Land"
+end
+-- =========================================================================
+-- ================== เพิ่มฟังก์ชัน Helper สำหรับตรวจสอบประเภทไข่ ==================
+local EggHabitatCache = {}
+local ResEggDatabase = require(InGameConfig:WaitForChild("ResEgg"))
+
+local function GetEggHabitat(eggTypeName)
+    if not eggTypeName then return "Land" end
+    if EggHabitatCache[eggTypeName] then return EggHabitatCache[eggTypeName] end
+
+    local eggData = ResEggDatabase.__index and ResEggDatabase.__index[eggTypeName]
+    
+    -- ใช้หลักการเดียวกับสัตว์เลี้ยง: ตรวจสอบ Category
+    if eggData and eggData.Category == "Ocean" then
+        EggHabitatCache[eggTypeName] = "Water"
+        return "Water"
+    end
+
+    -- ไข่ใบอื่นๆ ที่ไม่ใช่ Ocean ให้ถือว่าเป็นไข่ของสัตว์บก
+    EggHabitatCache[eggTypeName] = "Land"
+    return "Land"
+end
+-- =========================================================================
+
 --==============================================================
 --  MY PETS (workspace.Pets ของเราเท่านั้น)
 --==============================================================
@@ -873,37 +916,57 @@ local function __replacePetAtTile(oldUid, newUid, tilePart)
     return ok, ok and "replaced" or "place-failed"
 end
 
+-- ================== โค้ดแก้ไข runAutoPlacePet (เวอร์ชันกรองสัตว์ตามพื้นที่) ==================
 local function runAutoPlacePet(tok)
     while tok.alive do
         -- [ขั้นตอนที่ 1] คำนวณครั้งใหญ่: หาสัตว์ที่ต้องวางทั้งหมดและเรียงลำดับ
         Fluent:Notify({ Title = "Auto Place Pet", Content = "กำลังรวบรวมและจัดเรียงสัตว์...", Duration = 3 })
         local uidsToPlace, incMap = __getFilteredInventoryUidsSortedDesc()
 
+        --[[ ส่วนที่เพิ่มเข้ามา: กรองสัตว์ตามพื้นที่ที่เลือกใน UI ]]
+        local areaToPlace = Configuration.Pet.PlaceArea or "Any"
+        if areaToPlace ~= "Any" and #uidsToPlace > 0 then
+            local filteredUids = {}
+            dprint(("[AutoPlacePet] กรองสัตว์สำหรับพื้นที่: %s"):format(areaToPlace))
+            for _, uid in ipairs(uidsToPlace) do
+                local petNode = OwnedPetData:FindFirstChild(uid)
+                if petNode then
+                    local petTypeName = petNode:GetAttribute("T")
+                    if GetPetHabitat(petTypeName) == areaToPlace then
+                        table.insert(filteredUids, uid)
+                    end
+                end
+            end
+            uidsToPlace = filteredUids -- นำลิสต์ที่กรองแล้วมาใช้แทนของเดิม
+            dprint(("[AutoPlacePet] พบสัตว์ที่ตรงกับพื้นที่ %d ตัว"):format(#uidsToPlace))
+        end
+        --[[ สิ้นสุดส่วนที่เพิ่มเข้ามา ]]
+
         if #uidsToPlace > 0 then
             dprint("[AutoPlacePet] พบสัตว์ที่ต้องวาง", #uidsToPlace, "ตัว. เริ่มกระบวนการวาง...")
 
-            -- [ขั้นตอนที่ 2] ทยอยวางสัตว์จากลิสต์ที่เตรียมไว้ (ใช้ for loop แทน)
+            -- [ขั้นตอนที่ 2] ทยอยวางสัตว์จากลิสต์ที่เตรียมไว้
             for i = 1, #uidsToPlace do
                 if not tok.alive then break end
 
-                local wasActionTaken = false -- ตัวแปรเช็คว่ามีการวาง/สลับสัตว์ในรอบนี้หรือยัง
+                local wasActionTaken = false 
 
-                -- SmartPet Pass: ตรวจสอบว่าควรจะสลับสัตว์หรือไม่
+                -- SmartPet Pass
                 if Configuration.Pet.SmartPet then
                     local area = Configuration.Pet.PlaceArea or "Any"
                     local worstUid, worstInc, _, worstTilePart = __findWorstPlacedPetInArea(area)
-                    local bestUid = uidsToPlace[i] -- ใช้สัตว์ตัวปัจจุบันในลูป
+                    local bestUid = uidsToPlace[i] 
                     local bestInc = (bestUid and incMap[bestUid]) or 0
 
-                    if worstUid and bestInc > worstInc then
+                    if worstUid and bestInc > worstInc and GetPetHabitat(bestUid) == (worstTilePart and PlotIndex[Grid_keyXZ(worstTilePart.Position.X, worstTilePart.Position.Z)].area or area) then
                         dprint(("[SmartPet] พบตัวที่ดีกว่า! Best: %s (%d) > Worst: %s (%d)"):format(tostring(bestUid), bestInc, tostring(worstUid), worstInc))
                         local ok, reason = __replacePetAtTile(worstUid, bestUid, worstTilePart)
                         dprint("[SmartPet] Replace result:", ok, reason)
-                        wasActionTaken = true -- ถือว่ามีการทำงานแล้ว
+                        wasActionTaken = true 
                     end
                 end
 
-                -- Normal Placement Pass: วางสัตว์ในช่องที่ว่าง (ถ้ายังไม่มีการสลับ)
+                -- Normal Placement Pass
                 if not wasActionTaken then
                     local area = Configuration.Pet.PlaceArea or "Any"
                     local freeList = Grid_FreeList(area)
@@ -914,66 +977,75 @@ local function runAutoPlacePet(tok)
                         local dst = Grid_TileCenterPos(tile)
                         __placeOnePetToPos(uidToPlace, dst)
                     else
-                        -- ไม่มีที่ว่างแล้ว และ SmartPet ก็ไม่ได้ทำงาน
                         if not Configuration.Pet.SmartPet then
                            Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างแล้ว หยุดการวาง", Duration = 5 })
                         end
-                        break -- ออกจาก for loop เพราะไม่มีที่ว่างเหลือให้วางแล้ว
+                        break 
                     end
                 end
 
-                -- รอดีเลย์ตามที่ตั้งค่าไว้ก่อนจะไปทำกับสัตว์ตัวถัดไป
                 if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
             end
         else
-            -- ถ้าไม่มีสัตว์ให้วาง ก็แค่แจ้งเตือน
             Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่พบสัตว์ที่ตรงตามเงื่อนไขให้วาง", Duration = 4 })
         end
 
-        -- [ขั้นตอนที่ 3] เสร็จสิ้นการวาง: รอสักพักใหญ่ๆ ก่อนเริ่มรอบใหม่
+        -- [ขั้นตอนที่ 3] เสร็จสิ้นการวาง
         dprint("[AutoPlacePet] สิ้นสุดรอบการทำงาน. รอ 30 วินาทีเพื่อเริ่มรอบใหม่...")
         if not _waitAlive(tok, 30) then break end
     end
 end
+--=============================================================================
 
---================== โค้ดแก้ไข AutoPlaceEgg (ประสิทธิภาพสูง) ==================
+-- ================== โค้ดแก้ไข runAutoPlaceEgg (เวอร์ชันกรองไข่ตามพื้นที่) ==================
 local function runAutoPlaceEgg(tok)
     while tok.alive do
-        -- [ขั้นตอนที่ 1] รวบรวมและกรองไข่ที่ต้องวางทั้งหมด "แค่ครั้งเดียว"
+        -- [ขั้นตอนที่ 1] รวบรวมไข่ทั้งหมดที่ยังไม่ถูกวาง
         Fluent:Notify({ Title = "Auto Place Egg", Content = "กำลังรวบรวมไข่ที่ต้องวาง...", Duration = 3 })
-        local eggsToPlace = {}
+        local allUnplacedEggs = {}
         for _, eggNode in ipairs(OwnedEggData:GetChildren()) do
             if eggNode and not eggNode:FindFirstChild("DI") then
-                local t = eggNode:GetAttribute("T") or "BasicEgg"
-                local m = eggNode:GetAttribute("M") or "None"
-
-                local typePicked = (next(Configuration.Egg.Types) == nil) or (Configuration.Egg.Types[t] == true)
-                local mutPicked  = (next(Configuration.Egg.Mutations) == nil) or (Configuration.Egg.Mutations[m] == true)
-
-                if typePicked and mutPicked then
-                    table.insert(eggsToPlace, eggNode.Name)
-                end
+                table.insert(allUnplacedEggs, eggNode.Name)
             end
         end
 
-        -- [ขั้นตอนที่ 2] ตรวจสอบว่ามีไข่ให้วางหรือไม่
-        if #eggsToPlace > 0 then
-            dprint("[AutoPlaceEgg] พบไข่ที่ต้องวาง", #eggsToPlace, "ฟอง. เริ่มกระบวนการวาง...")
+        --[[ ส่วนที่เพิ่มเข้ามา: กรองไข่ตามพื้นที่และตัวกรองจาก UI ]]
+        local areaToPlace = Configuration.Egg.PlaceArea or "Any"
+        local eggsToPlace = {} -- ลิสต์สุดท้ายที่จะนำไปวาง
 
-            -- [ขั้นตอนที่ 3] วนลูปตามลิสต์ที่เตรียมไว้ เพื่อทยอยวางทีละฟอง
+        dprint(("[AutoPlaceEgg] กรองไข่สำหรับพื้นที่: %s"):format(areaToPlace))
+        for _, uid in ipairs(allUnplacedEggs) do
+            local eggNode = OwnedEggData:FindFirstChild(uid)
+            if eggNode then
+                local eggTypeName = eggNode:GetAttribute("T") or "BasicEgg"
+                local eggMutation = eggNode:GetAttribute("M") or "None"
+
+                -- 1. กรองตามพื้นที่ (Land/Water)
+                local habitatMatches = (areaToPlace == "Any") or (GetEggHabitat(eggTypeName) == areaToPlace)
+
+                -- 2. กรองตาม Type และ Mutation ที่เลือกใน UI
+                local typePicked = (next(Configuration.Egg.Types) == nil) or (Configuration.Egg.Types[eggTypeName] == true)
+                local mutPicked  = (next(Configuration.Egg.Mutations) == nil) or (Configuration.Egg.Mutations[eggMutation] == true)
+
+                if habitatMatches and typePicked and mutPicked then
+                    table.insert(eggsToPlace, uid)
+                end
+            end
+        end
+        dprint(("[AutoPlaceEgg] พบไข่ที่ตรงตามเงื่อนไขทั้งหมด %d ฟอง"):format(#eggsToPlace))
+        --[[ สิ้นสุดส่วนที่เพิ่มเข้ามา ]]
+
+        if #eggsToPlace > 0 then
+            -- [ขั้นตอนที่ 2] ทยอยวางไข่จากลิสต์ที่กรองแล้ว
             for _, uid in ipairs(eggsToPlace) do
                 if not tok.alive then break end
 
-                -- หาช่องว่าง "เท่าที่จำเป็น" ในแต่ละรอบ
-                local area = Configuration.Egg.PlaceArea or "Any"
-                local freeList = Grid_FreeList(area)
-
+                local freeList = Grid_FreeList(areaToPlace)
                 if #freeList == 0 then
                     Fluent:Notify({ Title = "Auto Place Egg", Content = "ไม่มีพื้นที่ว่างให้วางไข่แล้ว", Duration = 4 })
-                    break -- ออกจาก for loop ทันที เพราะไม่มีที่ว่าง
+                    break
                 end
 
-                -- ทำการวางไข่
                 local node = freeList[1]
                 task.wait(0.2)
                 CharacterRE:FireServer("Focus", uid)
@@ -986,14 +1058,13 @@ local function runAutoPlaceEgg(tok)
                 local ok = BlockFolder:WaitForChild(uid, 2) ~= nil
                 dprint("[AutoPlaceEgg]", uid, ok and "OK" or "FAIL")
 
-                -- รอดีเลย์สั้นๆ ก่อนวางฟองต่อไป
                 if not _waitAlive(tok, tonumber(Configuration.Egg.AutoPlaceEgg_Delay) or 1) then break end
             end
         else
             Fluent:Notify({ Title = "Auto Place Egg", Content = "ไม่พบไข่ที่ตรงตามเงื่อนไขให้วาง", Duration = 4 })
         end
 
-        -- [ขั้นตอนที่ 4] เมื่อวางหมด หรือ ไม่มีไข่ให้วาง ให้รอสักพักใหญ่ๆ ค่อยเริ่มรอบใหม่
+        -- [ขั้นตอนที่ 3] รอรอบใหม่
         dprint("[AutoPlaceEgg] สิ้นสุดรอบการทำงาน. รอ 30 วินาทีเพื่อเริ่มรอบใหม่...")
         if not _waitAlive(tok, 30) then break end
     end
