@@ -707,11 +707,55 @@ local function __filterForPlacing(uids)
 end
 
 -- ====== place (no TP) ======
+local __placing_now = false
+local __last_place_t = 0
+local __COOLDOWN_S = 0.40     -- กันสแปมเล็กน้อย (ปรับได้)
+local __CONFIRM_S  = 1.20     -- เวลารอยืนยัน (DI/โมเดลโผล่)
+
+local function __confirmPlaced(uid, timeout)
+    local t0, tmax = os.clock(), (timeout or __CONFIRM_S)
+    -- 1) ยืนยันจาก workspace (โมเดลมา)
+    while os.clock() - t0 < tmax do
+        if Pet_Folder:FindFirstChild(uid) then return true end
+        task.wait()
+    end
+    -- 2) สำรอง: ยืนยันจาก Data.Pets[uid].DI (เขียนตำแหน่งสำเร็จ)
+    local petNode = OwnedPetData:FindFirstChild(uid)
+    if petNode then
+        local di = petNode:FindFirstChild("DI")
+        if di then return true end
+    end
+    return false
+end
+
+local function __placeOneStrict(uid, tile)
+    if not uid or not tile then return false, "bad args" end
+    if __placing_now then return false, "busy" end
+    local dt = os.clock() - __last_place_t
+    if dt < __COOLDOWN_S then task.wait(__COOLDOWN_S - dt) end
+
+    __placing_now = true
+    CharacterRE:FireServer("Focus", uid)
+    task.wait(0.08)
+    CharacterRE:FireServer("Place", { DST = tile.pos, ID = uid })
+    task.wait(0.06)
+    CharacterRE:FireServer("Focus")
+    local ok = __confirmPlaced(uid, __CONFIRM_S)
+    __last_place_t = os.clock()
+    __placing_now = false
+
+    if ok then
+        __occupied[tile.key] = true
+        __uid2key[uid] = tile.key
+    end
+    return ok, ok and "placed" or "no confirm"
+end
+
 local function __placeOne(uid, dstVec3)
     CharacterRE:FireServer("Focus", uid)
-    task.wait(0.12)
+    task.wait(0.2)
     CharacterRE:FireServer("Place", { DST = Vector3.new(dstVec3.X, dstVec3.Y, dstVec3.Z), ID = uid })
-    task.wait(0.10)
+    task.wait(1)
     CharacterRE:FireServer("Focus")
     local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
     return ok
