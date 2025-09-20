@@ -1,6 +1,7 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
 -- Reorganized + Optimized version (legacy-friendly place logic)
+-- (Auto Place Pet/Egg code removed; stubs kept for wiring)
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -55,7 +56,6 @@ local OwnedPets = {}
 local Egg_Belt = {}
 local Configuration
 
-
 -- ==== DEBUG flags ====
 local G = getgenv()
 G.MEOWY_DBG = G.MEOWY_DBG or { on = true, toast = false }
@@ -80,9 +80,10 @@ end
 
 --==============================================================
 --                      OPTIMIZATION BLOCKS
+--   (kept for area detection used by other features)
 --==============================================================
 
--- ========= 1) Plot index cache + Occupied set =========
+-- ========= Plot index cache + Occupied-ish map (only area map kept) =========
 local PlotIndex = {}              -- "x,z" -> {part=..., area=..}
 local SortedPlots = { Any={}, Land={}, Water={} }
 do
@@ -107,31 +108,17 @@ do
     dprint("Plot counts -> Any=", #SortedPlots.Any, "Land=", #SortedPlots.Land, "Water=", #SortedPlots.Water)
 end
 
--- ========= Authoritative Occupied (rebuild on demand) =========
 local function _keyXZ(x,z)
     return ("%d,%d"):format(math.floor((x or 0)+0.5), math.floor((z or 0)+0.5))
 end
-
 local function _areaFromXZ(x, z)
     local n = PlotIndex[_keyXZ(x,z)]
     return n and n.area or "Any"
 end
 
-
 --==============================================================
 --                      HELPERS
 --==============================================================
-
--- (Helper) ฟังก์ชันสำหรับวาร์ปตัวละครไปใกล้ตำแหน่งเป้าหมาย (เวอร์ชันบังคับวาร์ปทุกครั้ง)
-local function ensureNear(position)
-    local char = Player.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    dprint("Teleporting to placement location to ensure proximity...")
-    root.CFrame = CFrame.new(position + Vector3.new(0, 3, 0))
-    task.wait(0.2) -- ให้เวลาตัวละครตั้งตัว
-end
 
 local function _toggleWhiteOverlay(show)
     local pg = Player:FindFirstChild("PlayerGui")
@@ -213,6 +200,7 @@ local function _cloneFoodMap(t)
     return m
 end
 
+-- (Helper) เลือกอาหารให้ Big Pet ตามสต็อก + per-pet allowlist
 local function pickFoodPerPet(uid, invAttrs)
     local per = Configuration.Pet.AutoFeed_PetFoods and Configuration.Pet.AutoFeed_PetFoods[uid]
     if type(per) ~= "table" then return nil end
@@ -315,7 +303,11 @@ local function _buildOwnedPetEntry(pet, petUID)
                 end
                 return 0
             elseif ind == "ProduceSpeed" or ind == "PS" then
-                return (root and root:GetAttribute("ProduceSpeed")) or 0
+                local rootLocal = rawget(tb, "RootPart") and rawget(tb, "RootPart").Parent
+                local rp = rawget(tb, "RootPart")
+                local model = rawget(tb, "Model")
+                local base = (rp and rp:GetAttribute("ProduceSpeed")) or (model and model:GetAttribute("ProduceSpeed")) or 0
+                return base
             end
             return rawget(tb, ind)
         end
@@ -335,7 +327,6 @@ for _,pet in pairs(Pet_Folder:GetChildren()) do
         if pet and uid then _buildOwnedPetEntry(pet, uid) end
     end)
 end
-
 
 --==============================================================
 --                      CONFIG / UI
@@ -567,243 +558,230 @@ local function _waitAlive(tok, sec)
     return tok.alive
 end
 
+--==============================================================
+--            AUTO PLACE PET (GridCenterPos-based)
+--==============================================================
 
+-- == local utils ==
+local function __round(n) return math.floor((tonumber(n) or 0) + 0.5) end
+local function __keyXZ(x,z) return string.format("%d,%d", __round(x), __round(z)) end
 
-----------------------------------------------------------------
--- ============ AUTOPLACE CORE (Filters + Place) ===============
-----------------------------------------------------------------
+local function __getAttrs(inst)
+    local ok, a = pcall(function() return inst:GetAttributes() end)
+    return ok and a or {}
+end
 
--- ====================================================================
---      VVV Auto Place Helpers (เวอร์ชันปรับปรุงและเข้ากันได้) VVV
--- ====================================================================
-
-local CollectionService = game:GetService("CollectionService")
-
-
-
-local function getIslandNumberFromName(islandName)
-    if not islandName then return nil end
-    local match = islandName:match("Island_(%d+)")
-    if match then return tonumber(match) end
-    match = islandName:match("(%d+)")
-    if match then return tonumber(match) end
+local function __parseGCP(v)
+    if typeof(v) == "Vector3" then return v end
+    if type(v) == "table" then
+        local x = v.X or v.x or v[1] or 0
+        local y = v.Y or v.y or v[2] or 0
+        local z = v.Z or v.z or v[3] or 0
+        return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
+    end
+    if type(v) == "string" then
+        local x,y,z = v:match("%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*")
+        return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
+    end
     return nil
 end
 
-local function getFarmParts(islandNumber)
-    if not islandNumber then return {} end
-    local art = workspace:FindFirstChild("Art")
-    if not art then return {} end
-    local islandName = "Island_" .. tostring(islandNumber)
-    local island = art:FindFirstChild(islandName)
-    if not island then
-        for _, child in ipairs(art:GetChildren()) do
-            if child.Name:match("^Island[_-]?" .. tostring(islandNumber) .. "$") then
-                island = child
-                break
-            end
-        end
-        if not island then return {} end
-    end
-
-    local farmParts, unlockedFarmParts = {}, {}
-    local function scanForFarmParts(parent)
-        for _, child in ipairs(parent:GetChildren()) do
-            if child:IsA("BasePart") and child.Name:match("^Farm_split_") then
-                table.insert(farmParts, child)
-            end
-            if #child:GetChildren() > 0 then scanForFarmParts(child) end
-        end
-    end
-    scanForFarmParts(island)
-
-    local locksFolder = island:FindFirstChild("ENV") and island:FindFirstChild("ENV"):FindFirstChild("Locks")
-    if not locksFolder then return farmParts end
-
-    local lockedAreas = {}
-    for _, lockModel in ipairs(locksFolder:GetChildren()) do
-        local farmPart = lockModel:FindFirstChild("Farm")
-        if farmPart and farmPart:IsA("BasePart") and farmPart.Transparency == 0 then
-            table.insert(lockedAreas, { cframe = farmPart.CFrame, size = farmPart.Size })
-        end
-    end
-
-    for _, farmPart in ipairs(farmParts) do
-        local isLocked = false
-        local farmPartPos = farmPart.Position
-        for _, lockArea in ipairs(lockedAreas) do
-            local relativePos = lockArea.cframe:PointToObjectSpace(farmPartPos)
-            if math.abs(relativePos.X) <= lockArea.size.X / 2 and math.abs(relativePos.Z) <= lockArea.size.Z / 2 then
-                isLocked = true
-                break
-            end
-        end
-        if not isLocked then
-            table.insert(unlockedFarmParts, farmPart)
-        end
-    end
-    return unlockedFarmParts
+local function __ensureNear(position)
+    local c = Player.Character
+    local root = c and c:FindFirstChild("HumanoidRootPart")
+    if root then root.CFrame = CFrame.new(position + Vector3.new(0,3,0)) end
 end
 
-
-
-local function isPetLikeModel(model)
-    if not model or not model:IsA("Model") then return false end
-    if model:FindFirstChildOfClass("Humanoid") then return true end
-    if model:FindFirstChild("AnimationController") then return true end
-    if model:GetAttribute("IsPet") or model:GetAttribute("PetType") or model:GetAttribute("T") then return true end
-    local lowerName = string.lower(model.Name)
-    if string.find(lowerName, "pet") or string.find(lowerName, "egg") then return true end
-    if CollectionService and (CollectionService:HasTag(model, "Pet") or CollectionService:HasTag(model, "IdleBigPet")) then
-        return true
-    end
-    return false
-end
-
--- ศูนย์กลางไทล์ (รองรับกรณีไม่ได้วางตรง CenterPivot)
-local function getTileCenterPosition(farmPart)
-    if not farmPart or not farmPart.IsA or not farmPart:IsA("BasePart") then return nil end
-    return farmPart.Position
-end
-
--- รวบรวมโมเดลที่ซ้อนทับไทล์ (ค้นแบบกล่องสูงขึ้นเล็กน้อย)
-local function getPetModelsOverlappingTile(farmPart)
-    if not farmPart or not farmPart:IsA("BasePart") then return {} end
-    local centerCF = farmPart.CFrame
-    local regionSize = Vector3.new(8, 14, 8)           -- สูงขึ้นเพื่อจับโมเดลที่ลอยเหนือพื้น
-    local params = OverlapParams.new()
-    params.RespectCanCollide = false
-
-    local parts = workspace:GetPartBoundsInBox(centerCF, regionSize, params)
-    local modelMap = {}
-    for _, part in ipairs(parts) do
-        if part ~= farmPart then
-            local model = part:FindFirstAncestorOfClass("Model")
-            if model and not modelMap[model] and isPetLikeModel(model) then
-                modelMap[model] = true
-            end
+-- == เก็บ Tile ทั้งหมดของเกาะ (แบ่ง Land/Water, สร้าง keyXZ)
+local function __collectTiles()
+    local tiles = {}
+    for _,p in ipairs(Island:GetDescendants()) do
+        if p:IsA("BasePart") and (p.Name:match("^Farm_split_") or p.Name:match("^WaterFarm_split_")) then
+            local area = p.Name:match("^Water") and "Water" or "Land"
+            tiles[#tiles+1] = {
+                part = p,
+                pos  = p.Position,
+                area = area,
+                key  = __keyXZ(p.Position.X, p.Position.Z),
+            }
         end
     end
-    local models = {}
-    for m in pairs(modelMap) do table.insert(models, m) end
-    return models
-end
-
--- รายชื่อสัตว์ของเราใน workspace เพื่อตัดชนกับ “สัตว์ที่วางแล้ว”
-local function getPlayerPetsInWorkspace()
-    local petsInWorkspace, dataPets = {}, Data and Data:FindFirstChild("Pets")
-    local workspacePets = workspace:FindFirstChild("Pets")
-    if not dataPets or not workspacePets then return petsInWorkspace end
-
-    for _, petCfg in ipairs(dataPets:GetChildren()) do
-        local petModel = workspacePets:FindFirstChild(petCfg.Name)
-        if petModel and petModel:IsA("Model") then
-            table.insert(petsInWorkspace, {
-                name = petCfg.Name,
-                model = petModel,
-                position = petModel:GetPivot().Position
-            })
-        end
-    end
-    return petsInWorkspace
-end
-
--- เช็คว่า “ไทล์ว่างจริงไหม” (เทียบกับจุดวางบนผิว ไม่ใช่ center)
-local function isFarmTileOccupied(farmPart, minDistance)
-    -- ค่าปลอดภัย: 6 สำหรับสัตว์/ไข่ที่มีชิ้นส่วนยื่น, 4 ถ้าต้องการแน่นขึ้น
-    minDistance = minDistance or 6
-
-    local center = getTileCenterPosition(farmPart)
-    if not center then return true end
-
-    -- จุดวางจริงบนผิว (ใน Zebub ใช้ +12 สำหรับไข่ที่ “ลอย” เหนือพื้น)
-    -- ถ้าคุณวางสัตว์ (ไม่ใช่ไข่) แล้ววัตถุไม่ได้ลอย สามารถลด offset ได้
-    local surfacePosition = Vector3.new(center.X, center.Y + 12, center.Z)
-
-    -- 1) ตรวจโมเดลที่ทับไทล์ (ไข่/สัตว์กำลังก่อตัวใน PlayerBuiltBlocks)
-    for _, model in ipairs(getPetModelsOverlappingTile(farmPart)) do
-        local pivotPos = model:GetPivot().Position
-        if (pivotPos - surfacePosition).Magnitude <= minDistance then
-            return true
-        end
-    end
-
-    -- 2) ตรวจสัตว์ที่ฟักแล้วใน workspace.Pets (ของผู้เล่นเอง)
-    for _, petInfo in ipairs(getPlayerPetsInWorkspace()) do
-        if (petInfo.position - surfacePosition).Magnitude <= minDistance then
-            return true
-        end
-    end
-
-    return false
-end
-
--- หาไทล์ว่าง (เวอร์ชัน near-player; ถ้าไม่ทราบตำแหน่งจะสุ่มจากไทล์ที่ว่าง)
-local function getPlayerRootPosition()
-    local ch = Player and Player.Character
-    local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
-    return hrp and hrp.Position or nil
-end
-
-local function findAvailableFarmPartNearPosition(farmParts, minDistance, targetPosition)
-    if not farmParts or #farmParts == 0 then return nil end
-    if not targetPosition then
-        local available = {}
-        for _, p in ipairs(farmParts) do
-            if not isFarmTileOccupied(p, minDistance) then
-                table.insert(available, p)
-            end
-        end
-        if #available == 0 then return nil end
-        return available[math.random(1, #available)]
-    end
-
-    local sorted = table.clone(farmParts)
-    table.sort(sorted, function(a, b)
-        return (a.Position - targetPosition).Magnitude < (b.Position - targetPosition).Magnitude
+    table.sort(tiles, function(a,b)
+        if a.pos.Z ~= b.pos.Z then return a.pos.Z < b.pos.Z end
+        return a.pos.X < b.pos.X
     end)
-    for _, p in ipairs(sorted) do
-        if not isFarmTileOccupied(p, minDistance) then
-            return p
-        end
-    end
-    return nil
+    return tiles
 end
 
-
--- (Helper) ดึง UID ของไข่ทั้งหมดที่ยังไม่ได้วาง
-local function getUnplacedEggUIDs()
-    local uids = {}
-    for _, eggNode in ipairs(OwnedEggData:GetChildren()) do
-        if not eggNode:FindFirstChild("DI") then
-            table.insert(uids, eggNode.Name)
+-- == set ตำแหน่งที่ถูกยึดจากสัตว์ (อ้างอิง GridCenterPos)
+local function __occupiedKeysFromPets()
+    local keys = {}
+    for _, m in ipairs(Pet_Folder:GetChildren()) do
+        if m:IsA("Model") then
+            local root = m.PrimaryPart or m:FindFirstChild("RootPart")
+            local ma, ra = __getAttrs(m), (root and __getAttrs(root) or {})
+            local gcp = __parseGCP(ra.GridCenterPos or ma.GridCenterPos)
+            if gcp then
+                keys[__keyXZ(gcp.X, gcp.Z)] = true
+            end
         end
     end
-    return uids
+    return keys
 end
 
--- (Helper) ดึง UID ของสัตว์เลี้ยงทั้งหมดที่ยังไม่ได้วาง (เวอร์ชันแก้ไข: เช็คจาก workspace โดยตรง)
-local function getUnplacedPetUIDs()
-    local uids = {}
-    local petsInWorkspace = workspace:FindFirstChild("Pets")
-    if not petsInWorkspace then
-        warn("Could not find 'Pets' folder in workspace!")
-        return uids 
+-- == คืนรายการ Tile ว่างตามพื้นที่ที่ต้องการ
+local function __freeTiles(area) -- "Any"|"Land"|"Water"
+    local tiles = __collectTiles()
+    local occ   = __occupiedKeysFromPets()
+    local free = {}
+    for _,t in ipairs(tiles) do
+        if not occ[t.key] then
+            if (area == "Any") or (t.area == area) then
+                free[#free+1] = t
+            end
+        end
     end
+    return free
+end
 
-    -- วนลูปสัตว์เลี้ยงทั้งหมดที่เรามีในข้อมูล
+-- == เลือก tile ว่าง (first / near-player)
+local function __pickFreeTile(area, mode)
+    area = area or "Any"; mode = mode or "near-player"
+    local list = __freeTiles(area)
+    if #list == 0 then return nil end
+    if mode == "first" then return list[1] end
+    local hrp = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return list[1] end
+    local best, bestd
+    for _,t in ipairs(list) do
+        local d = (t.pos - hrp.Position).Magnitude
+        if not bestd or d < bestd then best, bestd = t, d end
+    end
+    return best or list[1]
+end
+
+-- == หารายชื่อสัตว์ที่ยัง “ไม่ถูกวาง” (ไม่มีโมเดลใน workspace.Pets)
+local function __getUnplacedPetUIDs()
+    local uids = {}
     for _, petNode in ipairs(OwnedPetData:GetChildren()) do
-        -- เช็คว่าใน workspace ไม่มีโมเดลของสัตว์ตัวนี้อยู่
-        if not petsInWorkspace:FindFirstChild(petNode.Name) then
-            -- ถ้าไม่เจอใน workspace แปลว่ายังไม่ได้วาง
+        if not Pet_Folder:FindFirstChild(petNode.Name) then
             table.insert(uids, petNode.Name)
         end
     end
     return uids
 end
 
--- (Helper) ฟังก์ชันสำหรับคำนวณรายได้ของสัตว์ที่อยู่ใน Inventory
--- (Helper) ฟังก์ชันสำหรับคำนวณรายได้ของสัตว์ที่อยู่ใน Inventory (เวอร์ชันใหม่ที่แม่นยำกว่า)
+-- == คัดกรองตามโหมด UI: All / Match / Range
+local function __filterPetsForPlacing(list)
+    local mode = Configuration.Pet.PlacePet_Mode or "All"
+    if mode == "All" then return list end
+
+    local out = {}
+    for _, uid in ipairs(list) do
+        local petNode = OwnedPetData:FindFirstChild(uid)
+        if petNode then
+            if mode == "Match" then
+                local t = petNode:GetAttribute("T")
+                local m = petNode:GetAttribute("M") or "None"
+                if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
+                    table.insert(out, uid)
+                end
+            elseif mode == "Range" then
+                local inc = GetInventoryIncomePerSecByUID(uid)
+                local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
+                local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
+                if inc >= mn and inc <= mx then
+                    table.insert(out, uid)
+                end
+            end
+        end
+    end
+    return out
+end
+
+-- == ส่งคำสั่ง “Place” ไปยังเซิร์ฟเวอร์
+local function __placeOnePetToPos(uid, worldPos)
+    __ensureNear(worldPos)
+    task.wait(0.2)
+    CharacterRE:FireServer("Focus", uid)
+    task.wait(0.25)
+    CharacterRE:FireServer("Place", { DST = Vector3.new(worldPos.X, worldPos.Y, worldPos.Z), ID = uid })
+    task.wait(0.2)
+    CharacterRE:FireServer("Focus")
+    local ok = Pet_Folder:WaitForChild(uid, 3) ~= nil
+    return ok
+end
+
+-- == วางสัตว์ตัวเดียวลง tile ว่าง (คืนค่า: ok, msg)
+local function placePetOnFreeTile(uid, area, pickMode)
+    if not uid or uid == "" then return false, "no uid" end
+    local tile = __pickFreeTile(area or Configuration.Pet.PlaceArea or "Any", pickMode or "near-player")
+    if not tile then return false, "no free tile" end
+    local ok = __placeOnePetToPos(uid, tile.pos)
+    return ok, ok and "placed" or "no confirm"
+end
+
+-- == Runner: Auto Place Pet (ใช้ UI เดิมทั้งหมด)
+local function runAutoPlacePet(tok)
+    while tok.alive do
+        local area = Configuration.Pet.PlaceArea or "Any"
+        local uids = __getUnplacedPetUIDs()
+        if #uids > 0 then
+            -- เรียงตาม income/s สูงไปต่ำ เพื่อให้ช่องดีๆได้ตัวคุ้มก่อน
+            table.sort(uids, function(a,b)
+                return (GetInventoryIncomePerSecByUID(a) or 0) > (GetInventoryIncomePerSecByUID(b) or 0)
+            end)
+            uids = __filterPetsForPlacing(uids)
+
+            for _, uid in ipairs(uids) do
+                if not tok.alive then break end
+                local ok = select(1, placePetOnFreeTile(uid, area, "near-player"))
+                dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
+                task.wait(0.15)
+            end
+        end
+        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
+    end
+end
+
+
+local function runAutoPlaceEgg(tok)
+    dprint("[AutoPlaceEgg] temporarily disabled (stub).")
+    while tok.alive do
+        if not _waitAlive(tok, tonumber(Configuration.Egg.AutoPlaceEgg_Delay) or 1) then break end
+        break
+    end
+end
+
+--==============================================================
+--                    OTHER RUNNERS
+--==============================================================
+local function runAntiAFK(tok)
+    local VirtualUser = game:GetService("VirtualUser")
+    while tok.alive do
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+        if not _waitAlive(tok, 30) then break end
+    end
+end
+
+local function runAutoCollect(tok)
+    while tok.alive do
+        local claimed = 0
+        for _, pet in pairs(OwnedPets) do
+            if not tok.alive then break end
+            local RE = pet and pet.RE
+            if RE then
+                RE:FireServer("Claim")
+                claimed += 1
+                if claimed % 10 == 0 then task.wait() end
+            end
+        end
+        if not _waitAlive(tok, tonumber(Configuration.Main.Collect_Delay) or 3) then break end
+    end
+end
+
+-- (UI ขาย/คัดช่วง ยังใช้ตัวอ่าน income/s นี้อยู่)
 function GetInventoryIncomePerSecByUID(uid)
     if not uid or uid == "" then return 0 end
     local pg = Player:FindFirstChild("PlayerGui"); if not pg then return 0 end
@@ -855,202 +833,6 @@ function GetInventoryIncomePerSecByUID(uid)
         end
     end
     return 0
-end
-
-
--- (Core) กรองรายการไข่ตามเงื่อนไขใน Config
-local function filterEggs(eggUIDs)
-    local filtered = {}
-    local types = Configuration.Egg.Types or {}
-    local mutations = Configuration.Egg.Mutations or {}
-
-    for _, uid in ipairs(eggUIDs) do
-        local eggNode = OwnedEggData:FindFirstChild(uid)
-        if eggNode then
-            local eggType = eggNode:GetAttribute("T") or "BasicEgg"
-            local eggMuta = eggNode:GetAttribute("M") or "None"
-            if types[eggType] and mutations[eggMuta] then
-                table.insert(filtered, uid)
-            end
-        end
-    end
-    return filtered
-end
-
--- (Core) กรองรายการสัตว์ตามเงื่อนไขใน Config
-local function filterPets(petUIDs)
-    local filtered = {}
-    local mode = Configuration.Pet.PlacePet_Mode or "All"
-
-    if mode == "All" then
-        return petUIDs
-    end
-
-    for _, uid in ipairs(petUIDs) do
-        local petNode = OwnedPetData:FindFirstChild(uid)
-        if petNode then
-            if mode == "Match" then
-                local pType = petNode:GetAttribute("T")
-                local pMuta = petNode:GetAttribute("M") or "None"
-                if Configuration.Pet.PlacePet_Types[pType] and Configuration.Pet.PlacePet_Mutations[pMuta] then
-                    table.insert(filtered, uid)
-                end
-            elseif mode == "Range" then
-                local income = GetInventoryIncomePerSecByUID(uid)
-                local minInc = Configuration.Pet.PlacePet_Between.Min or 0
-                local maxInc = Configuration.Pet.PlacePet_Between.Max or math.huge
-                if income >= minInc and income <= maxInc then
-                    table.insert(filtered, uid)
-                end
-            end
-        end
-    end
-    return filtered
-end
-
--- (Core) ส่ง Remote Event เพื่อวางไอเทม (เวอร์ชันอัปเดต: เรียกใช้ ensureNear แบบใหม่)
-local function placeItem(uid, tilePart)
-    if not uid or not tilePart then return false end
-    
-    local dst = tilePart.Position
-
-    -- แก้ไขตรงนี้: เรียกใช้ ensureNear โดยไม่ต้องระบุระยะทางอีกต่อไป
-    ensureNear(dst) 
-
-    CharacterRE:FireServer("Focus", uid)
-    task.wait(0.5)
-
-    dprint("Attempting to place", uid, "at world position", dst)
-    local args = { "Place", { DST = Vector3.new(dst.X, dst.Y, dst.Z), ID = uid } }
-    CharacterRE:FireServer(unpack(args))
-    task.wait(0.2)
-
-    CharacterRE:FireServer("Focus") 
-    
-    return true
-end
-----------------------------------------------------------------
--- ============ AUTOPLACE RUNNERS (เวอร์ชันแก้ไข: จัดการพื้นที่ที่ล้มเหลว) ==============
-
-local function runAutoPlaceEgg(tok)
-    while tok.alive do
-        local uidsToPlace = getUnplacedEggUIDs()
-        local filteredUIDs = filterEggs(uidsToPlace)
-
-        if #filteredUIDs > 0 then
-            local islandNum = getIslandNumberFromName(IslandName)
-            -- ดึงรายการพื้นที่ทั้งหมด และเราจะลบพื้นที่ที่ใช้แล้ว/ล้มเหลวออกจากลิสต์นี้
-            local availableFarmParts = getFarmParts(islandNum)
-            
-            for _, uid in ipairs(filteredUIDs) do
-                if not tok.alive or #availableFarmParts == 0 then break end
-
-                local partToTry = findAvailableFarmPartNearPosition(availableFarmParts, 4, getPlayerRootPosition())
-
-                if partToTry then
-                    placeItem(uid, partToTry)
-                    
-                    -- ไม่ว่าจะสำเร็จหรือไม่ เราจะลบ Part นี้ออกจากลิสต์ที่จะใช้ในรอบนี้
-                    -- เพื่อป้องกันการใช้ซ้ำหรือติดลูปที่ตำแหน่งเดิม
-                    local partIndex = table.find(availableFarmParts, partToTry)
-                    if partIndex then
-                        table.remove(availableFarmParts, partIndex)
-                    end
-
-                    dprint("Waiting for egg data confirmation for:", uid)
-                    local eggNode = OwnedEggData:FindFirstChild(uid)
-                    if eggNode then
-                        local di = eggNode:WaitForChild("DI", 2)
-                        if not di then
-                             dprint("Confirmation failed for egg:", uid)
-                        end
-                    end
-                    task.wait(0.2)
-                else
-                    dprint("AutoPlaceEgg: No more available parts found.")
-                    break
-                end
-            end
-        end
-
-        if not _waitAlive(tok, tonumber(Configuration.Egg.AutoPlaceEgg_Delay) or 1) then break end
-    end
-end
-
-local function runAutoPlacePet(tok)
-    while tok.alive do
-        local uidsToPlace = getUnplacedPetUIDs()
-        local filteredUIDs = filterPets(uidsToPlace)
-
-        if #filteredUIDs > 1 then
-            table.sort(filteredUIDs, function(uid_a, uid_b)
-                return (GetInventoryIncomePerSecByUID(uid_a) or 0) > (GetInventoryIncomePerSecByUID(uid_b) or 0)
-            end)
-        end
-
-        if #filteredUIDs > 0 then
-            local islandNum = getIslandNumberFromName(IslandName)
-            -- ดึงรายการพื้นที่ทั้งหมด และเราจะลบพื้นที่ที่ใช้แล้ว/ล้มเหลวออกจากลิสต์นี้
-            local availableFarmParts = getFarmParts(islandNum)
-
-            for _, uid in ipairs(filteredUIDs) do
-                if not tok.alive or #availableFarmParts == 0 then break end
-
-                local partToTry = findAvailableFarmPartNearPosition(availableFarmParts, 4, getPlayerRootPosition())
-
-                if partToTry then
-                    placeItem(uid, partToTry)
-                    local partIndex = table.find(availableFarmParts, partToTry)
-                    if partIndex then
-                        table.remove(availableFarmParts, partIndex)
-                    end
-
-                    dprint("Waiting for pet model confirmation for:", uid)
-                    local petModel = Pet_Folder:WaitForChild(uid, 3)
-                    if not petModel then
-                        dprint("Confirmation failed for pet:", uid)
-                    else
-                        dprint("Successfully placed and confirmed pet:", uid)
-                    end
-                    task.wait(0.2)
-                else
-                    dprint("AutoPlacePet: No more available parts found.")
-                    break
-                end
-            end
-        end
-
-        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
-    end
-end
-
-
---==============================================================
---                    RUNNERS
---==============================================================
-local function runAntiAFK(tok)
-    local VirtualUser = game:GetService("VirtualUser")
-    while tok.alive do
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-        if not _waitAlive(tok, 30) then break end
-    end
-end
-
-local function runAutoCollect(tok)
-    while tok.alive do
-        local claimed = 0
-        for _, pet in pairs(OwnedPets) do
-            if not tok.alive then break end
-            local RE = pet and pet.RE
-            if RE then
-                RE:FireServer("Claim")
-                claimed += 1
-                if claimed % 10 == 0 then task.wait() end
-            end
-        end
-        if not _waitAlive(tok, tonumber(Configuration.Main.Collect_Delay) or 3) then break end
-    end
 end
 
 local function runAutoFeed(tok)
@@ -1127,9 +909,6 @@ local function runAutoCollectPet(tok)
     end
 end
 
-
-
-
 local function runAutoHatch(tok)
     while tok.alive do
         local wantArea = Configuration.Egg.HatchArea or "Any"
@@ -1189,8 +968,6 @@ local function runAutoBuyEgg(tok)
     end
 end
 
-
-
 local function runAutoBuyFood(tok)
     local FoodList = Data:WaitForChild("FoodStore",30):WaitForChild("LST",30)
     local RE = GameRemoteEvents:WaitForChild("FoodStoreRE")
@@ -1215,7 +992,7 @@ local function runAutoLottery(tok)
 end
 
 --==============================================================
---                      UI (unchanged except notes)
+--                      UI
 --==============================================================
 local Window = Fluent:CreateWindow({
     Title = GameName, SubTitle = "by DemiGodz", TabWidth = 160,
@@ -1276,9 +1053,11 @@ Tabs.Pet:AddToggle("Auto Collect Pet",{ Title="Auto Collect Pet", Default=false,
     Configuration.Pet.CollectPet_Auto = v
     if v then TaskMgr.start("AutoCollectPet", runAutoCollectPet) else TaskMgr.stop("AutoCollectPet") end
 end })
+-- NOTE: Toggle เดิมคงไว้ แต่ตอน on จะสตาร์ทสตับ + toast
 Tabs.Pet:AddToggle("Auto Place Pet",{ Title="Auto Place Pet", Default=false, Callback=function(v)
     Configuration.Pet.AutoPlacePet = v
     if v then
+        Fluent:Notify({ Title = "Auto Place Pet", Content = "This feature is temporarily disabled (stub).", Duration = 4 })
         TaskMgr.start("AutoPlacePet", runAutoPlacePet)
     else
         TaskMgr.stop("AutoPlacePet")
@@ -1356,16 +1135,14 @@ Tabs.Pet:AddSection("Settings")
 Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 10, Min = 10, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
 Tabs.Pet:AddSlider("AutoCollectPet Delay",{ Title = "Auto Collect Pet Delay", Default = 5, Min = 5, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.CollectPet_Delay = v end })
 
---==== Per-pet foods (เดิม) ====
+--==== Per-pet foods ====
 local BigPetUIDLabels = {}
-
 local function labelForBigPet(uid, P)
     return string.format("[%s|%s] %s",
         tostring(P and P.Type or "?"),
         tostring(P and P.Mutate or "None"),
         tostring(uid))
 end
-
 local function labelToUID(v)
     if type(v) ~= "string" then return v end
     if BigPetUIDLabels and BigPetUIDLabels[v] then
@@ -1410,7 +1187,6 @@ Tabs.Pet:AddButton({
         Fluent:Notify({ Title="Per-Pet Food", Content=("บันทึกอาหารให้ UID: %s แล้ว"):format(uid), Duration=4 })
     end
 })
-
 Tabs.Pet:AddButton({
     Title = "Clear foods for this pet",
     Description = "ล้างรายการอาหารของ Big Pet ตัวที่เลือก",
@@ -1422,14 +1198,12 @@ Tabs.Pet:AddButton({
         end
     end
 })
-
 Tabs.Pet:AddToggle("Use Per-Pet Foods", {
     Title = "Use per-pet foods first",
     Default = true,
     Callback = function(v) Configuration.Pet.AutoFeed_UsePerPet = v end
 })
 
--- อัปเดตรายการ label ของ Big Pets
 local function updateBigPetUIDDropdowns()
     local labels = {}
     BigPetUIDLabels = {}
@@ -1445,7 +1219,6 @@ local function updateBigPetUIDDropdowns()
         pcall(function() PickPetForFoodDD:SetValues(labels) end)
     end
 end
-
 table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(function()
     task.delay(0.2, updateBigPetUIDDropdowns)
 end))
@@ -1454,7 +1227,6 @@ table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(function()
 end))
 task.defer(updateBigPetUIDDropdowns)
 
--- เลือก Big Pets ที่จะให้อาหาร
 local FeedTargetsDD = Tabs.Pet:AddDropdown("Pet Feed_Targets", {
     Title = "Select Big Pets to Feed",
     Description = "เลือกเฉพาะ Big Pets ที่จะให้อาหาร (เว้นว่าง = ให้อาหาร Big ทุกตัว)",
@@ -1475,7 +1247,7 @@ local FeedTargetsDD = Tabs.Pet:AddDropdown("Pet Feed_Targets", {
     end
 })
 
--- ตัวกรอง Collect/Place (ของแท็บ Pet ต่อ)
+-- ตัวกรอง Collect/Place (UI คงเดิม)
 Tabs.Pet:AddDropdown("CollectPet Type",{ Title = "Collect Pet Type", Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation","Range"}, Multi = false, Default = "All", Callback = function(v) Configuration.Pet.CollectPet_Type = v end })
 Tabs.Pet:AddDropdown("CollectPet Area",{ Title = "Collect Pet Area", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Pet.CollectPet_Area = v end })
 Tabs.Pet:AddDropdown("CollectPet Pets",{ Title = "Collect Pets", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Pets = v end })
@@ -1483,7 +1255,7 @@ Tabs.Pet:AddDropdown("CollectPet Mutations",{ Title = "Collect Mutations", Value
 Tabs.Pet:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Min = tonumber(v) end })
 Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Max = tonumber(v) end })
 
--- ====== Pet > Auto Place Pet Settings ======
+-- ====== Pet > Auto Place Pet Settings (UI คงไว้) ======
 Tabs.Pet:AddSection("Auto Place Pet Settings")
 Tabs.Pet:AddDropdown("PlacePet Area", {
     Title = "Place Area (Pet)",
@@ -1497,20 +1269,17 @@ Tabs.Pet:AddDropdown("PlacePet Mode", {
     Values = {"All","Match","Range"},
     Multi = false,
     Default = "All",
-    Callback = function(v)
-        Configuration.Pet.PlacePet_Mode = v
-        
-    end
+    Callback = function(v) Configuration.Pet.PlacePet_Mode = v end
 })
 Tabs.Pet:AddDropdown("PlacePet Types", {
     Title = "Place Types (Match)",
     Values = Pets_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Pet.PlacePet_Types = v;  end
+    Callback = function(v) Configuration.Pet.PlacePet_Types = v end
 })
 Tabs.Pet:AddDropdown("PlacePet Mutations", {
     Title = "Place Mutations (Match)",
     Values = Mutations_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Pet.PlacePet_Mutations = v;  end
+    Callback = function(v) Configuration.Pet.PlacePet_Mutations = v end
 })
 Tabs.Pet:AddSlider("AutoPlacePet Delay", {
     Title = "Auto Place Pet Delay", Description = "ดีเลย์การพยายามวางสัตว์ในแต่ละครั้ง (วิ)",
@@ -1521,13 +1290,13 @@ Tabs.Pet:AddInput("PlacePet_MinIncome", {
     Title = "Min income/s (Range)",
     Default = tostring(Configuration.Pet.PlacePet_Between.Min or 0),
     Numeric = true, Finished = true,
-    Callback = function(v) Configuration.Pet.PlacePet_Between.Min = tonumber(v) or 0;  end
+    Callback = function(v) Configuration.Pet.PlacePet_Between.Min = tonumber(v) or 0 end
 })
 Tabs.Pet:AddInput("PlacePet_MaxIncome", {
     Title = "Max income/s (Range)",
     Default = tostring(Configuration.Pet.PlacePet_Between.Max or 1000000),
     Numeric = true, Finished = true,
-    Callback = function(v) Configuration.Pet.PlacePet_Between.Max = tonumber(v) or math.huge;  end
+    Callback = function(v) Configuration.Pet.PlacePet_Between.Max = tonumber(v) or math.huge end
 })
 
 --============================== Egg ==============================
@@ -1540,10 +1309,11 @@ Tabs.Egg:AddToggle("Auto Egg",{ Title="Auto Buy Egg", Default=false, Callback=fu
     Configuration.Egg.AutoBuyEgg = v
     if v then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) else TaskMgr.stop("AutoBuyEgg") end
 end })
+-- NOTE: Toggle เดิมคงไว้ แต่ตอน on จะสตาร์ทสตับ + toast
 Tabs.Egg:AddToggle("Auto Place Egg",{ Title="Auto Place Egg", Default=false, Callback=function(v)
     Configuration.Egg.AutoPlaceEgg = v
     if v then
-        
+        Fluent:Notify({ Title = "Auto Place Egg", Content = "This feature is temporarily disabled (stub).", Duration = 4 })
         TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg)
     else
         TaskMgr.stop("AutoPlaceEgg")
@@ -1560,12 +1330,12 @@ Tabs.Egg:AddDropdown("PlaceEgg Area", { Title = "Place Area (Egg)", Values = {"A
 Tabs.Egg:AddDropdown("Egg Type", {
     Title = "Types",
     Values = Eggs_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Egg.Types = v; end
+    Callback = function(v) Configuration.Egg.Types = v end
 })
 Tabs.Egg:AddDropdown("Egg Mutations", {
     Title = "Mutations",
     Values = Mutations_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Egg.Mutations = v; end
+    Callback = function(v) Configuration.Egg.Mutations = v end
 })
 Tabs.Egg:AddInput("Min Coin to Buy", {
     Title = "Min Coin", Default = tostring(Configuration.Egg.MinCoin or 0),
@@ -1795,7 +1565,7 @@ Tabs.Players:AddButton({
                     end
                     Configuration.Waiting = false
                 end },
-                { Title = "No", Callback = function() end }
+                { Title = "No" }
             }
         })
     end
@@ -2065,10 +1835,10 @@ local function _autostart()
     if Configuration.Main.AutoCollect then TaskMgr.start("AutoCollect", runAutoCollect) end
     if Configuration.Pet.AutoFeed then TaskMgr.start("AutoFeed", runAutoFeed) end
     if Configuration.Pet.CollectPet_Auto then TaskMgr.start("AutoCollectPet", runAutoCollectPet) end
-    if Configuration.Pet.AutoPlacePet then TaskMgr.start("AutoPlacePet", runAutoPlacePet) end
+    if Configuration.Pet.AutoPlacePet then TaskMgr.start("AutoPlacePet", runAutoPlacePet) end -- stub
     if Configuration.Egg.AutoHatch then TaskMgr.start("AutoHatch", runAutoHatch) end
     if Configuration.Egg.AutoBuyEgg then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) end
-    if Configuration.Egg.AutoPlaceEgg then TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg) end
+    if Configuration.Egg.AutoPlaceEgg then TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg) end -- stub
     if Configuration.Shop.Food.AutoBuy then TaskMgr.start("AutoBuyFood", runAutoBuyFood) end
     if Configuration.Event.AutoClaim then TaskMgr.start("AutoClaim", runAutoClaim) end
     if Configuration.Event.AutoLottery then TaskMgr.start("AutoLottery", runAutoLottery) end
