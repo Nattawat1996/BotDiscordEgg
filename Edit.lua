@@ -1027,20 +1027,23 @@ local function runAntiAFK(tok)
 end
 
 local function runAutoCollect(tok)
+    -- ไม่จำเป็นต้องใช้ COOLDOWN_BETWEEN_BATCH แล้ว
     while tok.alive do
-        local claimed, MAX_PER_TICK = 0, 60
         for _, pet in pairs(OwnedPets) do
-            if not tok.alive then break end
-            if claimed >= MAX_PER_TICK then break end
+            if not tok.alive then break end -- ออกจากลูปทันทีถ้าปิดฟังก์ชัน
+
             local RE = pet and pet.RE
             if RE then
-                RE:FireServer("Claim")
-                claimed = claimed + 1
-                if claimed % 8 == 0 then task.wait() end
+                pcall(function() RE:FireServer("Claim") end)
+                task.wait(0.1) -- << เพิ่มการหน่วงเวลาตรงนี้!
+            else
+                task.wait() -- พักเล็กน้อยถ้าไม่เจอ RE
             end
         end
+
+        -- รอดีเลย์หลักตามที่ตั้งค่าไว้ใน UI
         local d = tonumber(Configuration.Main.Collect_Delay) or 3
-        _waitAlive(tok, d + math.random() * 0.25)
+        if not _waitAlive(tok, d) then break end
     end
 end
 
@@ -1210,23 +1213,21 @@ local function runAutoBuyEgg(tok)
     local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
     local function currentCoin()
         local asset = InventoryData or Data:FindFirstChild("Asset")
-        if not asset then return 0 end
-        return tonumber(asset:GetAttribute("Coin") or 0) or 0
+        return asset and (tonumber(asset:GetAttribute("Coin") or 0) or 0) or 0
     end
     while tok.alive do
-        local coinOk = (not Configuration.Egg.CheckMinCoin)
-            or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0))
-        if coinOk then
+        if (not Configuration.Egg.CheckMinCoin) or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0)) then
             for _,egg in pairs(Egg_Belt) do
                 if not tok.alive then break end
-                local EggType = egg.Type
-                local EggMutation = egg.Mutate
-                if (Configuration.Egg.Types[EggType]) and (Configuration.Egg.Mutations[EggMutation]) then
-                    if RE then RE:FireServer("BuyEgg", egg.UID) end
+                local okType = Configuration.Egg.Types[egg.Type]
+                local okMut  = Configuration.Egg.Mutations[egg.Mutate]
+                if okType and okMut then
+                    pcall(function() RE:FireServer("BuyEgg", egg.UID) end)
+                    task.wait(0.15 + math.random() * 0.15)
                 end
             end
         end
-        if not _waitAlive(tok, tonumber(Configuration.Egg.AutoBuyEgg_Delay) or 1) then break end
+        if not _waitAlive(tok, (tonumber(Configuration.Egg.AutoBuyEgg_Delay) or 1) + math.random()*0.4) then break end
     end
 end
 
@@ -1237,10 +1238,11 @@ local function runAutoBuyFood(tok)
         for foodName,stockAmount in pairs(FoodList:GetAttributes()) do
             if not tok.alive then break end
             if stockAmount > 0 and Configuration.Shop.Food.Foods[foodName] then
-                if RE then RE:FireServer(foodName) end
+                pcall(function() RE:FireServer(foodName) end)
+                task.wait(0.12 + math.random()*0.12)
             end
         end
-        if not _waitAlive(tok, tonumber(Configuration.Shop.Food.AutoBuy_Delay) or 1) then break end
+        if not _waitAlive(tok, (tonumber(Configuration.Shop.Food.AutoBuy_Delay) or 1) + math.random()*0.35) then break end
     end
 end
 
@@ -1261,17 +1263,19 @@ local Window = Fluent:CreateWindow({
     Size = UDim2.fromOffset(522, 414), Acrylic = true, Theme = "Dark",
     MinimizeKey = Enum.KeyCode.LeftControl
 })
+-- วาง Home เป็นแท็บแรก (จะขึ้นบนสุด)
+local Home = Window:AddTab({ Title = "Home", Icon = "home" })
 local Tabs = {
-    About = Window:AddTab({ Title = "About" }),
-    Main = Window:AddTab({ Title = "Main Features" }),
-    Pet = Window:AddTab({ Title = "Pet Features" }),
-    Egg = Window:AddTab({ Title = "Egg Features" }),
-    Shop = Window:AddTab({ Title = "Shop Features" }),
-    Event = Window:AddTab({ Title = "Event Feature" }),
-    Players = Window:AddTab({ Title = "Players Features" }),
-    Sell = Window:AddTab({ Title = "Sell Features" }),
-    Inv = Window:AddTab({ Title = "Inventory" }),
+    Main = Window:AddTab({ Title = "Main Features", Icon = "home" }),
+    Pet = Window:AddTab({ Title = "Pet Features", Icon = "AnimalPawPrint" }),
+    Egg = Window:AddTab({ Title = "Egg Features", Icon = "FoodEgg" }),
+    Shop = Window:AddTab({ Title = "Shop Features", Icon = "BuildingShop" }),
+    Event = Window:AddTab({ Title = "Event Feature", Icon = "TasksApp" }),
+    Players = Window:AddTab({ Title = "Players Features", Icon = "ShieldPerson" }),
+    Sell = Window:AddTab({ Title = "Sell Features", Icon = "BoxMultipleArrowRight" }),
+    Inv = Window:AddTab({ Title = "Inventory", Icon = "Box" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
+    About = Window:AddTab({ Title = "About" }),
 }
     Options = Fluent.Options
 
@@ -2076,10 +2080,10 @@ InterfaceManager:BuildInterfaceSection(Tabs.Settings)
 SaveManager:BuildConfigSection(Tabs.Settings)
 
 -----------------------------------------------------------------
--- ===== UX/UI ADDITIONS (Home, Presets, Status, Logs, Search) =====
+-- ===== UX/UI (Home at top • No Profiles/Logs/SearchPlayer) =====
 -----------------------------------------------------------------
--- Home / Quick Actions / Status
-local Home = Window:AddTab({ Title = "Home", Icon = "home" })
+
+
 
 local StatusPara = Home:AddParagraph({
   Title = "Status",
@@ -2158,34 +2162,11 @@ Home:AddButton({
   end
 })
 
-Home:AddSection("Profiles")
-Home:AddInput("ProfileName", {
-  Title = "ตั้งชื่อโปรไฟล์",
-  Default = "MyProfile",
-  Placeholder = "ชื่อโปรไฟล์",
-  Callback = function(_) end
-})
-Home:AddButton({
-  Title = "Save Profile",
-  Description = "บันทึกค่าปัจจุบันเป็นโปรไฟล์",
-  Callback = function()
-    local name = Options["ProfileName"].Value or "MyProfile"
-    SaveManager:SetFolder("FluentScriptHub/"..game.PlaceId)
-    SaveManager:Save(name)
-    Fluent:Notify({ Title = "Profiles", Content = "บันทึกโปรไฟล์: "..name, Duration = 3 })
-  end
-})
-Home:AddButton({
-  Title = "Load Profile",
-  Description = "โหลดโปรไฟล์ตามชื่อ",
-  Callback = function()
-    local name = Options["ProfileName"].Value or "MyProfile"
-    SaveManager:Load(name)
-    Fluent:Notify({ Title = "Profiles", Content = "โหลดโปรไฟล์: "..name, Duration = 3 })
-  end
-})
+-- ลบ Profiles ออก: (ProfileName / Save Profile / Load Profile) — ถูกถอดออก
+-- ลบ Logs ออกทั้งหมด
+-- ลบ Search Player ออกทั้งหมด
 
--- Lock dependent inputs (Auto Place Pet settings)
+-- Helper: ล็อก input ของ Auto Place Pet (คงไว้)
 local function SetInputsEnabled(ids, enabled)
   for _, id in ipairs(ids) do
     pcall(function()
@@ -2217,33 +2198,7 @@ task.spawn(function()
   end
 end)
 
--- Logs tab
-local Logs = Window:AddTab({ Title = "Logs", Icon = "list" })
-local LogBox = Logs:AddParagraph({ Title = "Recent", Content = "ยังไม่มีข้อความ…" })
-local _logbuf = {}
-local function pushLog(line)
-  table.insert(_logbuf, os.date("!%H:%M:%S").."  "..line)
-  if #_logbuf > 40 then table.remove(_logbuf, 1) end
-  LogBox:SetDesc(table.concat(_logbuf, "\n"))
-end
-
--- Player search
-Tabs.Players:AddInput("PlayerSearch", {
-  Title = "ค้นหา Player",
-  Placeholder = "พิมพ์บางส่วนของชื่อ",
-  Callback = function(q)
-    q = tostring(q or ""):lower()
-    local filtered = {}
-    for _, name in ipairs(Players_InGame) do
-      if q == "" or name:lower():find(q, 1, true) then
-        table.insert(filtered, name)
-      end
-    end
-    pcall(function() Options["Players Dropdown"]:SetValues(filtered) end)
-  end
-})
-
--- Progress helper
+-- Progress helper (ตัดการเขียน log ออก)
 local function withProgress(title, runner)
   local ok, err = pcall(function()
     Fluent:Notify({ Title = title, Content = "เริ่มทำงาน…", Duration = 2 })
@@ -2254,26 +2209,26 @@ local function withProgress(title, runner)
   end)
   if not ok then
     Fluent:Notify({ Title = title, Content = "ล้มเหลว: "..tostring(err), Duration = 5 })
-    pushLog("[ERROR] "..tostring(err))
   end
 end
 
--- Refresh status loop
+-- วนรีเฟรชสถานะไว้หน้า Home
 task.spawn(function()
   while RunningEnvirontments do
     refreshStatus()
-    task.wait(1.5)
+    task.wait(4)  -- เดิม 1.5 → 4 เพื่อลดโหลด UI
   end
 end)
 
--- Show Home as default tab after build
+-- เปิด Home เป็นแท็บเริ่มต้น
+
+
+-----------------------------------------------------------------
+-- ================== END UX/UI (Simplified) =====================
+-----------------------------------------------------------------
+
+
 Window:SelectTab(Home)
-
------------------------------------------------------------------
--- ================== END UX/UI ADDITIONS ========================
------------------------------------------------------------------
-
-Window:SelectTab(1)
 Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
 Perf_Set3DEnabled(not (Configuration.Perf.Disable3D == true))
 
