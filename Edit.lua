@@ -688,7 +688,13 @@ end
 --==============================================================
 --            AUTO PLACE PET (GridCenterPos-based)
 --==============================================================
-
+local function __tileCenterPos(tilePart)
+    local p = tilePart
+    local cx = math.floor(p.Position.X + 0.5)   -- snap เข้ากริดแกน X
+    local cz = math.floor(p.Position.Z + 0.5)   -- snap เข้ากริดแกน Z
+    local cy = p.Position.Y + (p.Size.Y * 0.5)  -- กลาง-บนผิวกระเบื้อง
+    return Vector3.new(cx, cy, cz)
+end
 -- == local utils ==
 local function __round(n) return math.floor((tonumber(n) or 0) + 0.5) end
 local function __keyXZ(x,z) return string.format("%d,%d", __round(x), __round(z)) end
@@ -823,14 +829,14 @@ local function placePetOnFreeTile(uid, area)
     if not uid or uid == "" then return false, "no uid" end
     local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
     local occ  = __occupiedKeysFromPets_fast()
-    local tile
+    local part
     for i = 1, #pool do
-        local part = pool[i]
-        local k = _keyXZ(part.Position.X, part.Position.Z)
-        if not occ[k] then tile = { pos = part.Position } break end
+        local k = _keyXZ(pool[i].Position.X, pool[i].Position.Z)
+        if not occ[k] then part = pool[i]; break end
     end
-    if not tile then return false, "no free tile" end
-    local ok = __placeOnePetToPos(uid, tile.pos)
+    if not part then return false, "no free tile" end
+    local dst = __tileCenterPos(part)
+    local ok  = __placeOnePetToPos(uid, dst)
     return ok, ok and "placed" or "no confirm"
 end
 
@@ -941,7 +947,8 @@ local function runAutoPlacePet(tok)
                 task.wait(0.15)
                 CharacterRE:FireServer("Focus", uid)
                 task.wait(0.25)
-                CharacterRE:FireServer("Place", { DST = node.pos, ID = uid })
+                local dst = __tileCenterPos(node.part)
+                CharacterRE:FireServer("Place", { DST = dst, ID = uid })
                 task.wait(0.75)
                 CharacterRE:FireServer("Focus")
 
