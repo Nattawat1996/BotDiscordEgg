@@ -1,6 +1,6 @@
 --==============================================================
 -- Build A Zoo (PlaceId 105555311806207)
---V2.1+smartpet
+--V2.1 Smartpet
 --==============================================================
 if game.PlaceId ~= 105555311806207 then return end
 
@@ -992,90 +992,97 @@ local function runAutoPlacePet(tok)
         end)()
 
         if #freeList == 0 then
-            Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างให้วางสัตว์แล้ว • ปิด Auto Place ให้", Duration = 5 })
-            pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
-            TaskMgr.stop("AutoPlacePet")
-            break
-        end
-
-        -- 2) รวบรวม UID ที่ยังไม่ถูกวาง
-        local uids = {}
-        for _, petNode in ipairs(OwnedPetData:GetChildren()) do
-            local uid = petNode.Name
-            if not Pet_Folder:FindFirstChild(uid) then
-                uids[#uids+1] = uid
+            if not Configuration.Pet.SmartPet then
+                Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างให้วางสัตว์แล้ว • ปิด Auto Place ให้", Duration = 5 })
+                pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+                TaskMgr.stop("AutoPlacePet")
+                break
+            else
+                -- ไม่มีช่องว่าง แต่เปิด SmartPet: ข้ามการ “วางใหม่” ไปรอรอบถัดไป (ยังสลับได้รอบหน้า)
+                if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
+                -- ไปวนรอบ while ใหม่ (ไม่ต้อง continue แค่ไม่ทำส่วนถัดไป)
             end
-        end
-
-        if #uids > 0 then
-            -- 3) cache income/s เพียงครั้งเดียว
-            local inc_by_uid = {}
-            for i = 1, #uids do
-                local uid = uids[i]
-                inc_by_uid[uid] = GetIncomeFast(uid)
+        else
+            -- ===== มีช่องว่าง: ทำงานวางสัตว์ตามเดิม =====
+            -- 2) รวบรวม UID ที่ยังไม่ถูกวาง
+            local uids = {}
+            for _, petNode in ipairs(OwnedPetData:GetChildren()) do
+                local uid = petNode.Name
+                if not Pet_Folder:FindFirstChild(uid) then
+                    uids[#uids+1] = uid
+                end
             end
-
-            -- 4) sort โดยใช้ cache
-            table.sort(uids, function(a,b)
-                return (inc_by_uid[a] or 0) > (inc_by_uid[b] or 0)
-            end)
-
-            -- 5) คัดกรองตามโหมด (ใช้ cache)
-            uids = (function(list, inc_map)
-                local mode = Configuration.Pet.PlacePet_Mode or "All"
-                if mode == "All" then return list end
-                local out = {}
-                for _, uid in ipairs(list) do
-                    local petNode = OwnedPetData:FindFirstChild(uid)
-                    if petNode then
-                        if mode == "Match" then
-                            local t = petNode:GetAttribute("T")
-                            local m = petNode:GetAttribute("M") or "None"
-                            if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
-                                out[#out+1] = uid
-                            end
-                        elseif mode == "Range" then
-                            local inc = inc_map and inc_map[uid]
-                            if inc == nil then inc = GetInventoryIncomePerSecByUID(uid) end
-                            local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
-                            local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
-                            if inc >= mn and inc <= mx then
-                                out[#out+1] = uid
+        
+            if #uids > 0 then
+                -- 3) cache income/s เพียงครั้งเดียว
+                local inc_by_uid = {}
+                for i = 1, #uids do
+                    local uid = uids[i]
+                    inc_by_uid[uid] = GetIncomeFast(uid)
+                end
+        
+                -- 4) sort โดยใช้ cache
+                table.sort(uids, function(a,b)
+                    return (inc_by_uid[a] or 0) > (inc_by_uid[b] or 0)
+                end)
+        
+                -- 5) คัดกรองตามโหมด (ใช้ cache)
+                uids = (function(list, inc_map)
+                    local mode = Configuration.Pet.PlacePet_Mode or "All"
+                    if mode == "All" then return list end
+                    local out = {}
+                    for _, uid in ipairs(list) do
+                        local petNode = OwnedPetData:FindFirstChild(uid)
+                        if petNode then
+                            if mode == "Match" then
+                                local t = petNode:GetAttribute("T")
+                                local m = petNode:GetAttribute("M") or "None"
+                                if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
+                                    out[#out+1] = uid
+                                end
+                            elseif mode == "Range" then
+                                local inc = inc_map and inc_map[uid]
+                                if inc == nil then inc = GetInventoryIncomePerSecByUID(uid) end
+                                local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
+                                local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
+                                if inc >= mn and inc <= mx then
+                                    out[#out+1] = uid
+                                end
                             end
                         end
                     end
+                    return out
+                end)(uids, inc_by_uid)
+        
+                -- 6) วางตามลำดับช่อง
+                for _, uid in ipairs(uids) do
+                    if not tok.alive then break end
+                    if #freeList == 0 then
+                        Fluent:Notify({ Title = "Auto Place Pet", Content = "พื้นที่ว่างหมดระหว่างการวาง • ปิด Auto Place ให้", Duration = 5 })
+                        pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+                        TaskMgr.stop("AutoPlacePet")
+                        tok.alive = false
+                        break
+                    end
+        
+                    local idx, node = 1, freeList[1]
+                    task.wait(0.15)
+                    CharacterRE:FireServer("Focus", uid)
+                    task.wait(0.25)
+                    local dst = __tileCenterPos(node.part)
+                    CharacterRE:FireServer("Place", { DST = dst, ID = uid })
+                    task.wait(0.75)
+                    CharacterRE:FireServer("Focus")
+        
+                    local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
+                    dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
+                    if ok then table.remove(freeList, idx) end
+                    task.wait(0.1)
                 end
-                return out
-            end)(uids, inc_by_uid)
-
-            -- 6) วางตามลำดับช่อง: ใช้ช่องแรกใน freeList แล้ว pop ออก
-            for _, uid in ipairs(uids) do
-                if not tok.alive then break end
-                if #freeList == 0 then
-                    Fluent:Notify({ Title = "Auto Place Pet", Content = "พื้นที่ว่างหมดระหว่างการวาง • ปิด Auto Place ให้", Duration = 5 })
-                    pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
-                    TaskMgr.stop("AutoPlacePet")
-                    tok.alive = false
-                    break
-                end
-
-                local idx, node = 1, freeList[1]  -- <<--- เรียงตามช่อง (ไม่ NearPlayer)
-                task.wait(0.15)
-                CharacterRE:FireServer("Focus", uid)
-                task.wait(0.25)
-                local dst = __tileCenterPos(node.part)
-                CharacterRE:FireServer("Place", { DST = dst, ID = uid })
-                task.wait(0.75)
-                CharacterRE:FireServer("Focus")
-
-                local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
-                dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
-                if ok then table.remove(freeList, idx) end
-                task.wait(0.1)
             end
         end
-
-        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
+        -- รอรอบถัดไป (ทั้งสองแขนง)
+        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end        
     end
 end
 
