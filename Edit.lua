@@ -1267,16 +1267,16 @@ local Window = Fluent:CreateWindow({
 -- วาง Home เป็นแท็บแรก (จะขึ้นบนสุด)
 local Home = Window:AddTab({ Title = "Home", Icon = "home" })
 local Tabs = {
-    Main = Window:AddTab({ Title = "Main Features", Icon = "home" }),
-    Pet = Window:AddTab({ Title = "Pet Features", Icon = "AnimalPawPrint" }),
-    Egg = Window:AddTab({ Title = "Egg Features", Icon = "FoodEgg" }),
-    Shop = Window:AddTab({ Title = "Shop Features", Icon = "BuildingShop" }),
-    Event = Window:AddTab({ Title = "Event Feature", Icon = "TasksApp" }),
-    Players = Window:AddTab({ Title = "Players Features", Icon = "ShieldPerson" }),
-    Sell = Window:AddTab({ Title = "Sell Features", Icon = "BoxMultipleArrowRight" }),
-    Inv = Window:AddTab({ Title = "Inventory", Icon = "Box" }),
+    Main = Window:AddTab({ Title = "Main Features", Icon = "monitor-check" }),
+    Pet = Window:AddTab({ Title = "Pet Features", Icon = "paw-print" }),
+    Egg = Window:AddTab({ Title = "Egg Features", Icon = "egg" }),
+    Shop = Window:AddTab({ Title = "Shop Features", Icon = "shopping-cart" }),
+    Event = Window:AddTab({ Title = "Event Feature", Icon = "bookmark-check" }),
+    Players = Window:AddTab({ Title = "Players Features", Icon = "shield-user" }),
+    Sell = Window:AddTab({ Title = "Sell Features", Icon = "badge-dollar-sign" }),
+    Inv = Window:AddTab({ Title = "Inventory", Icon = "archive" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
-    About = Window:AddTab({ Title = "About" }),
+    About = Window:AddTab({ Title = "badge-info" }),
 }
     Options = Fluent.Options
 
@@ -1294,19 +1294,19 @@ Tabs.Main:AddSection("Performance")
 Tabs.Main:AddToggle("FPS_Lock", { Title = "Lock FPS", Default = false, Callback = function(v)
     Configuration.Perf.FPSLock = v; ApplyFPSLock()
 end })
-Tabs.Main:AddInput("FPS_Value", { Title = "FPS Cap (ใส่ตัวเลขแล้วกด Enter)", Default = tostring(Configuration.Perf.FPSValue), Numeric = true, Finished = true, Callback = function(v)
+Tabs.Main:AddInput("FPS_Value", { Title = "FPS Cap", Default = tostring(Configuration.Perf.FPSValue), Numeric = true, Finished = true, Callback = function(v)
     Configuration.Perf.FPSValue = tonumber(v) or 60; if Configuration.Perf.FPSLock then ApplyFPSLock() end
 end })
-Tabs.Main:AddToggle("Hide Pets", { Title = "ซ่อนโมเดลสัตว์ทั้งหมด", Default = false, Callback = function(v)
+Tabs.Main:AddToggle("Hide Pets", { Title = "Disable Pets Model", Default = false, Callback = function(v)
     Configuration.Perf.HidePets = v; ApplyHidePets(v)
 end })
-Tabs.Main:AddToggle("Hide Eggs", { Title = "ซ่อนโมเดลไข่ (ของตนเอง)", Default = false, Callback = function(v)
+Tabs.Main:AddToggle("Hide Eggs", { Title = "Disable Eggs Model", Default = false, Callback = function(v)
     Configuration.Perf.HideEggs = v; ApplyHideEggs(v)
 end })
-Tabs.Main:AddToggle("Hide Effects", { Title = "ปิด Effects (Particle/Beam/Trail/Highlight)", Default = false, Callback = function(v)
+Tabs.Main:AddToggle("Hide Effects", { Title = "Disable Effects", Default = false, Callback = function(v)
     Configuration.Perf.HideEffects = v; ApplyHideEffects(v)
 end })
-Tabs.Main:AddToggle("Hide Game UI", { Title = "ซ่อน UI ของเกม (เว้นแผงนี้)", Default = false, Callback = function(v)
+Tabs.Main:AddToggle("Hide Game UI", { Title = "Hide UI", Default = false, Callback = function(v)
     Configuration.Perf.HideGameUI = v; ApplyHideGameUI(v)
 end })
 
@@ -1424,7 +1424,7 @@ local function labelToUID(v)
 end
 
 PickPetForFoodDD = Tabs.Pet:AddDropdown("PickPet ForFood", {
-    Title = "Pick Big Pet (set foods for this pet)",
+    Title = "Pick Big Pet",
     Values = {}, Multi = false, Default = "",
     Callback = function(label)
         Configuration.Pet._PickPetForFood = labelToUID(label or "")
@@ -1434,14 +1434,14 @@ PickPetForFoodDD = Tabs.Pet:AddDropdown("PickPet ForFood", {
 local function _cloneFoodMap_ext(t) return _cloneFoodMap(t) end
 
 local PickFoodsForPetDD = Tabs.Pet:AddDropdown("PickFoods ForOnePet", {
-    Title = "Foods allowed for selected pet",
-    Description = "เลือกชนิดอาหารที่จะอนุญาตให้สัตว์ตัวนี้กิน (จะพยายามใช้ตามสต็อก)",
+    Title = "Select Food",
+    Description = "เลือกชนิดอาหารที่จะอนุญาตให้สัตว์ตัวนี้กิน",
     Values = PetFoods_InGame, Multi = true, Default = {},
     Callback = function(v) Configuration.Pet._PickFoodsDraft = v end
 })
 Tabs.Pet:AddButton({
     Title = "Save foods to this pet",
-    Description = "บันทึกชุดอาหารให้กับ Big Pet ที่เลือก (UID)",
+    Description = "บันทึกชุดอาหารให้กับ Big Pet ที่เลือก",
     Callback = function()
         local uid   = Configuration.Pet._PickPetForFood
         local draft = Configuration.Pet._PickFoodsDraft
