@@ -1203,6 +1203,7 @@ local function runAutoClaim(tok)
             for _,Quest in pairs(Tasks:GetChildren()) do
                 if not tok.alive then break end
                 EventRE:FireServer({event = "claimreward",id = Quest:GetAttribute("Id")})
+                task.wait(0.5) -- << เพิ่มการหน่วงเวลาตรงนี้!
             end
         end
         if not _waitAlive(tok, tonumber(Configuration.Event.AutoClaim_Delay) or 3) then break end
