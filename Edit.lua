@@ -178,14 +178,12 @@ end
 
 --==============================================================
 --  MY PETS (workspace.Pets ของเราเท่านั้น)
---  วางไว้ใกล้ ๆ ส่วนประกาศ Services/Globals หลังจากมี PlayerUserID
 --==============================================================
-local MyPets = {}          -- [Model] = true  (เฉพาะของเรา)
-local MyPets_List = {}     -- อาเรย์ใช้งานสะดวก (อัปเดตอัตโนมัติ)
+local MyPets = {}
+local MyPets_List = {}
 
 local function _isOwnedPetModel(model)
     if not (model and model:IsA("Model")) then return false end
-    -- เช็คจาก Attribute ของตัว Model หรือ RootPart/PrimaryPart
     local uid = model:GetAttribute("UserId")
     if uid == PlayerUserID then return true end
     local root = model.PrimaryPart or model:FindFirstChild("RootPart")
@@ -194,7 +192,6 @@ local function _isOwnedPetModel(model)
 end
 
 local function _rebuildMyPetsList()
-    -- รีเฟรช MyPets_List จากคีย์ของ MyPets
     table.clear(MyPets_List)
     for m in pairs(MyPets) do
         if m.Parent == workspace.Pets then
@@ -219,12 +216,9 @@ local function _removeMyPet(m)
     end
 end
 
--- preload
 for _,m in ipairs(workspace.Pets:GetChildren()) do _addMyPet(m) end
--- live update
 workspace.Pets.ChildAdded:Connect(function(m) task.defer(_addMyPet, m) end)
 workspace.Pets.ChildRemoved:Connect(function(m) task.defer(_removeMyPet, m) end)
-
 
 local function _toggleWhiteOverlay(show)
     local pg = Player:FindFirstChild("PlayerGui")
@@ -596,20 +590,18 @@ local function _applyEffectInst(inst, enable)
 end
 
 local function _applyEffectInst_batch(list, enable)
-    -- ทำเป็นก้อนละ 300 ชิ้น ต่อเฟรม
     local batch, n = 300, #list
     local i = 1
     while i <= n do
         local j = math.min(i + batch - 1, n)
         for k = i, j do _applyEffectInst(list[k], enable) end
         i = j + 1
-        task.wait() -- yield หน่อย ลดแข็ง
+        task.wait()
     end
 end
 
 local function ApplyHideEffects(on)
     if _effectsConn then _effectsConn:Disconnect(); _effectsConn = nil end
-    -- เก็บรายการก่อน แล้วค่อย apply แบบ batch
     local all = {}
     for _,d in ipairs(workspace:GetDescendants()) do
         if d:IsA("ParticleEmitter") or d:IsA("Beam") or d:IsA("Trail") or d:IsA("Highlight") or d:IsA("Explosion") then
@@ -690,12 +682,11 @@ end
 --==============================================================
 local function __tileCenterPos(tilePart)
     local p = tilePart
-    local cx = math.floor(p.Position.X + 0.5)   -- snap เข้ากริดแกน X
-    local cz = math.floor(p.Position.Z + 0.5)   -- snap เข้ากริดแกน Z
-    local cy = p.Position.Y + (p.Size.Y * 0.5)  -- กลาง-บนผิวกระเบื้อง
+    local cx = math.floor(p.Position.X + 0.5)
+    local cz = math.floor(p.Position.Z + 0.5)
+    local cy = p.Position.Y + (p.Size.Y * 0.5)
     return Vector3.new(cx, cy, cz)
 end
--- == local utils ==
 local function __round(n) return math.floor((tonumber(n) or 0) + 0.5) end
 local function __keyXZ(x,z) return string.format("%d,%d", __round(x), __round(z)) end
 
@@ -719,14 +710,11 @@ local function __parseGCP(v)
     return nil
 end
 
--- ==== FAST tile / occupancy (no re-scanning island) ====
-
 local function _dist2(a, b)
     local dx, dy, dz = a.X - b.X, a.Y - b.Y, a.Z - b.Z
     return dx*dx + dy*dy + dz*dz
 end
 
--- ใช้ MyPets_List ที่คุณมีแล้ว เพื่อทำแผนที่ช่องที่ถูกยึด (key = _keyXZ)
 local function __occupiedKeysFromPets_fast()
     local keys = {}
     for _, m in ipairs(MyPets_List) do
@@ -744,7 +732,6 @@ local function __occupiedKeysFromPets_fast()
     return keys
 end
 
--- สร้าง “รายการช่องว่าง” จาก SortedPlots (ไม่ GetDescendants/ไม่ sort ใหม่)
 local function __buildFreeList(area)
     local occ = __occupiedKeysFromPets_fast()
     local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
@@ -759,7 +746,6 @@ local function __buildFreeList(area)
     return free
 end
 
--- เลือก index ใน free-list (คืนค่า: idx, node) — รองรับ near-player แบบเร็ว
 local function __pickIndexFromFreeList(freeList, mode, hrpPos)
     if #freeList == 0 then return nil, nil end
     if mode == "first" or not hrpPos then return 1, freeList[1] end
@@ -771,7 +757,6 @@ local function __pickIndexFromFreeList(freeList, mode, hrpPos)
     return bestIdx or 1, freeList[bestIdx or 1]
 end
 
--- == หารายชื่อสัตว์ที่ยัง “ไม่ถูกวาง” (ไม่มีโมเดลใน workspace.Pets)
 local function __getUnplacedPetUIDs()
     local uids = {}
     for _, petNode in ipairs(OwnedPetData:GetChildren()) do
@@ -782,7 +767,6 @@ local function __getUnplacedPetUIDs()
     return uids
 end
 
--- รับ inc_map (optional) เพื่อเลี่ยงอ่าน GUI ระหว่างคัดกรอง
 local function __filterPetsForPlacing(list, inc_map)
     local mode = Configuration.Pet.PlacePet_Mode or "All"
     if mode == "All" then return list end
@@ -811,8 +795,6 @@ local function __filterPetsForPlacing(list, inc_map)
     return out
 end
 
-
--- == ส่งคำสั่ง “Place” ไปยังเซิร์ฟเวอร์
 local function __placeOnePetToPos(uid, worldPos)
     task.wait(0.2)
     CharacterRE:FireServer("Focus", uid)
@@ -824,7 +806,6 @@ local function __placeOnePetToPos(uid, worldPos)
     return ok
 end
 
--- == วางสัตว์ตัวเดียวลง tile ว่าง (คืนค่า: ok, msg)
 local function placePetOnFreeTile(uid, area)
     if not uid or uid == "" then return false, "no uid" end
     local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
@@ -840,7 +821,6 @@ local function placePetOnFreeTile(uid, area)
     return ok, ok and "placed" or "no confirm"
 end
 
--- ดึง "สัตว์ที่ยังไม่ถูกวาง" ตามตัวกรอง + income cache
 local function __getFilteredInventoryUidsSortedDesc()
     local uids = {}
     for _, node in ipairs(OwnedPetData:GetChildren()) do
@@ -851,25 +831,21 @@ local function __getFilteredInventoryUidsSortedDesc()
     end
     if #uids == 0 then return {} end
 
-    -- ใช้ cache เร็วของคุณ
     local inc = {}
     for i = 1, #uids do
         local uid = uids[i]
         inc[uid] = GetIncomeFast(uid) or 0
     end
 
-    -- คัดกรองตามโหมด Place
     uids = __filterPetsForPlacing(uids, inc)
 
     table.sort(uids, function(a, b) return (inc[a] or 0) > (inc[b] or 0) end)
     return uids, inc
 end
 
--- หา "อ่อนสุดที่วางอยู่" ในพื้นที่ที่เลือก (ยกเว้น Big ถ้าต้องการ)
 local function __findWorstPlacedPetInArea(areaWant)
     local worstUid, worstInc, worstTileKey, worstTilePart
     for uid, P in pairs(OwnedPets) do
-        -- ข้าม Big Pet
         if P and not P.IsBig then
             local okArea = (areaWant == "Any") or (petArea(uid) == areaWant)
             if okArea then
@@ -895,11 +871,10 @@ local function __findWorstPlacedPetInArea(areaWant)
     return worstUid, worstInc or 0, worstTileKey, worstTilePart
 end
 
--- แทนที่: เก็บตัวเดิม + วางตัวใหม่ทับช่องเดิม
 local function __replacePetAtTile(oldUid, newUid, tilePart)
     local Pold = OwnedPets[oldUid]
     if Pold and Pold.IsBig then
-        return false, "skip-big"   -- ไม่แตะ Big
+        return false, "skip-big"
     end
     if not tilePart then return false, "no tile" end
     local dst = __tileCenterPos(tilePart)
@@ -917,7 +892,6 @@ local function __replacePetAtTile(oldUid, newUid, tilePart)
     return ok, ok and "replaced" or "place-failed"
 end
 
-
 local function runAutoPlacePet(tok)
     while tok.alive do
         local area = Configuration.Pet.PlaceArea or "Any"
@@ -925,42 +899,34 @@ local function runAutoPlacePet(tok)
             if not Configuration.Pet.SmartPet then return end
             local area = Configuration.Pet.PlaceArea or "Any"
         
-            -- 1) inventory (ยังไม่ถูกวาง) ที่ผ่านตัวกรอง เรียงจากมากไปน้อย
             local invUids, incMap = __getFilteredInventoryUidsSortedDesc()
             if not invUids or #invUids == 0 then return end
         
-            -- 2) หาเป้าหมายอ่อนสุดที่วางอยู่
             local tries = 0
             while tries < (limitReplace or 3) do
                 local worstUid, worstInc, _, worstTilePart = __findWorstPlacedPetInArea(area)
                 if not worstUid then break end
         
-                -- best inventory ตอนนี้
                 local bestUid = invUids[1]
                 local bestInc = (bestUid and incMap and incMap[bestUid]) or (bestUid and GetIncomeFast(bestUid)) or 0
         
-                -- ถ้าไม่ดีกว่า ก็จบ
                 if not bestUid or (bestInc <= (worstInc or 0)) then break end
         
-                -- ลองแทนที่
                 local ok = false
                 if worstTilePart then
                     ok = select(1, __replacePetAtTile(worstUid, bestUid, worstTilePart))
                 end
         
-                -- เอาตัวที่ใช้ไปออกจาก inv list
                 table.remove(invUids, 1)
-        
-                -- ถ้าแทนที่สำเร็จนับหนึ่งครั้ง แล้วลองวนต่อ (ไม่เกิน limit)
-                tries += (ok and 1 or 1)  -- นับครั้งไม่ว่าผลจะสำเร็จหรือไม่ เพื่อคุมรอบ
+                tries += (ok and 1 or 1)
                 if #invUids == 0 then break end
                 task.wait(0.1)
             end
         end
         __smartPassOnce(1)
-        -- 1) สร้าง free-list จาก SortedPlots ตามลำดับช่อง (Z->X)
+
         local freeList = (function()
-            local occ = (function() -- occupied keys จาก MyPets_List
+            local occ = (function()
                 local keys = {}
                 for _, m in ipairs(MyPets_List) do
                     local root = m.PrimaryPart or m:FindFirstChild("RootPart")
@@ -995,13 +961,9 @@ local function runAutoPlacePet(tok)
                 TaskMgr.stop("AutoPlacePet")
                 break
             else
-                -- ไม่มีช่องว่าง แต่เปิด SmartPet: ข้ามการ “วางใหม่” ไปรอรอบถัดไป (ยังสลับได้รอบหน้า)
                 if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
-                -- ไปวนรอบ while ใหม่ (ไม่ต้อง continue แค่ไม่ทำส่วนถัดไป)
             end
         else
-            -- ===== มีช่องว่าง: ทำงานวางสัตว์ตามเดิม =====
-            -- 2) รวบรวม UID ที่ยังไม่ถูกวาง
             local uids = {}
             for _, petNode in ipairs(OwnedPetData:GetChildren()) do
                 local uid = petNode.Name
@@ -1011,19 +973,16 @@ local function runAutoPlacePet(tok)
             end
         
             if #uids > 0 then
-                -- 3) cache income/s เพียงครั้งเดียว
                 local inc_by_uid = {}
                 for i = 1, #uids do
                     local uid = uids[i]
                     inc_by_uid[uid] = GetIncomeFast(uid)
                 end
         
-                -- 4) sort โดยใช้ cache
                 table.sort(uids, function(a,b)
                     return (inc_by_uid[a] or 0) > (inc_by_uid[b] or 0)
                 end)
         
-                -- 5) คัดกรองตามโหมด (ใช้ cache)
                 uids = (function(list, inc_map)
                     local mode = Configuration.Pet.PlacePet_Mode or "All"
                     if mode == "All" then return list end
@@ -1051,7 +1010,6 @@ local function runAutoPlacePet(tok)
                     return out
                 end)(uids, inc_by_uid)
         
-                -- 6) วางตามลำดับช่อง
                 for _, uid in ipairs(uids) do
                     if not tok.alive then break end
                     if #freeList == 0 then
@@ -1078,12 +1036,9 @@ local function runAutoPlacePet(tok)
                 end
             end
         end
-        -- รอรอบถัดไป (ทั้งสองแขนง)
         if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end        
     end
 end
-
-
 
 local function runAutoPlaceEgg(tok)
     dprint("[AutoPlaceEgg] temporarily disabled (stub).")
@@ -1107,7 +1062,7 @@ end
 
 local function runAutoCollect(tok)
     while tok.alive do
-        local claimed, MAX_PER_TICK = 0, 60  -- เคลมสูงสุดต่อรอบ
+        local claimed, MAX_PER_TICK = 0, 60
         for _, pet in pairs(OwnedPets) do
             if not tok.alive then break end
             if claimed >= MAX_PER_TICK then break end
@@ -1119,11 +1074,10 @@ local function runAutoCollect(tok)
             end
         end
         local d = tonumber(Configuration.Main.Collect_Delay) or 3
-        _waitAlive(tok, d + math.random() * 0.25) -- ใส่ jitter เล็กน้อย กัน burst ชนกัน
+        _waitAlive(tok, d + math.random() * 0.25)
     end
 end
 
--- (UI ขาย/คัดช่วง ยังใช้ตัวอ่าน income/s นี้อยู่)
 function GetInventoryIncomePerSecByUID(uid)
     if not uid or uid == "" then return 0 end
     local pg = Player:FindFirstChild("PlayerGui"); if not pg then return 0 end
@@ -1334,6 +1288,342 @@ local function runAutoLottery(tok)
 end
 
 --==============================================================
+--                MERGED ACTIONS (Collect/Gift/Sell)
+--==============================================================
+function DoCollectPetOnce()
+    Window:Dialog({
+        Title = "Collect Pet Alert", Content = "Are you sure?",
+        Buttons = {
+            { Title = "Yes", Callback = function()
+                local CollectType = Configuration.Pet.CollectPet_Type
+                local areaWant = Configuration.Pet.CollectPet_Area
+                local function passArea(uid)
+                    if areaWant == "Any" then return true end
+                    return petArea(uid) == areaWant
+                end
+
+                if CollectType == "All" then
+                    for UID, PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and passArea(UID) then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del", UID)
+                        end
+                    end
+                elseif CollectType == "Match Pet" then
+                    for UID, PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and passArea(UID)
+                        and Configuration.Pet.CollectPet_Pets[PetData.Type] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del", UID)
+                        end
+                    end
+                elseif CollectType == "Match Mutation" then
+                    for UID, PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and passArea(UID)
+                        and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del", UID)
+                        end
+                    end
+                elseif CollectType == "Match Pet&Mutation" then
+                    for UID, PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and passArea(UID)
+                        and Configuration.Pet.CollectPet_Pets[PetData.Type]
+                        and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                            if PetData.RE then PetData.RE:FireServer("Claim") end
+                            CharacterRE:FireServer("Del", UID)
+                        end
+                    end
+                elseif CollectType == "Range" then
+                    local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
+                    local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
+                    for UID, PetData in pairs(OwnedPets) do
+                        if PetData and not PetData.IsBig and passArea(UID) then
+                            local ps = tonumber(PetData.ProduceSpeed) or 0
+                            if ps >= minV and ps <= maxV then
+                                if PetData.RE then PetData.RE:FireServer("Claim") end
+                                CharacterRE:FireServer("Del", UID)
+                            end
+                        end
+                    end
+                end
+            end },
+            { Title = "No", Callback = function() end }
+        }
+    })
+end
+
+function DoSendGift()
+    Window:Dialog({
+        Title = "Send Gift Alert", Content = "Are you sure?",
+        Buttons = {
+            { Title = "Yes", Callback = function()
+                local GiftRE = GameRemoteEvents:WaitForChild("GiftRE")
+                local GiftType = Configuration.Players.SelectType
+                local GiftPlayer = Players:FindFirstChild(Configuration.Players.SelectPlayer)
+                if not GiftPlayer then return end
+
+                local function _limit()
+                    local n = tonumber(Configuration.Players.Gift_Limit)
+                    return (n and n > 0) and n or math.huge
+                end
+                local LIMIT = _limit()
+                local sent = 0
+                local function sentOne()
+                    sent = sent + 1
+                    return sent >= LIMIT
+                end
+
+                Configuration.Waiting = true
+
+                if GiftType == "All_Pets" then
+                    for _, PetData in pairs(OwnedPetData:GetChildren()) do
+                        if PetData and not PetData:GetAttribute("D") then
+                            CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
+                            GiftRE:FireServer(GiftPlayer) task.wait(0.75)
+                            if sentOne() then break end
+                        end
+                    end
+                elseif GiftType == "Range_Pets" then
+                    local minV = tonumber(Configuration.Players.GiftPet_Between.Min) or 0
+                    local maxV = tonumber(Configuration.Players.GiftPet_Between.Max) or math.huge
+                    for _, PetData in ipairs(OwnedPetData:GetChildren()) do
+                        if PetData and not PetData:GetAttribute("D") then
+                            local uid = PetData.Name
+                            if not OwnedPets[uid] then
+                                local inc = GetInventoryIncomePerSecByUID(uid)
+                                if inc and inc >= minV and inc <= maxV then
+                                    CharacterRE:FireServer("Focus", uid) task.wait(0.75)
+                                    GiftRE:FireServer(GiftPlayer)      task.wait(0.75)
+                                    if sentOne() then break end
+                                end
+                            end
+                        end
+                    end
+                elseif GiftType == "Match Pet" then
+                    for _, PetData in pairs(OwnedPetData:GetChildren()) do
+                        if PetData then
+                            local petType = PetData:GetAttribute("T")
+                            if petType and Configuration.Players.Pet_Type[petType] then
+                                CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
+                                GiftRE:FireServer(GiftPlayer)                   task.wait(0.75)
+                                if sentOne() then break end
+                            end
+                        end
+                    end
+                elseif GiftType == "Match Pet&Mutation" then
+                    for _, PetData in pairs(OwnedPetData:GetChildren()) do
+                        if PetData then
+                            local t = PetData:GetAttribute("T")
+                            local m = PetData:GetAttribute("M") or "None"
+                            if t and m and Configuration.Players.Pet_Type[t] and Configuration.Players.Pet_Mutations[m] then
+                                CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
+                                GiftRE:FireServer(GiftPlayer)                   task.wait(0.75)
+                                if sentOne() then break end
+                            end
+                        end
+                    end
+                elseif GiftType == "All_Eggs_And_Foods" then
+                    if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                    local invAttrs = (InventoryData and InventoryData:GetAttributes()) or {}
+                    local function trySendFocus(name)
+                        CharacterRE:FireServer("Focus", name) task.wait(0.75)
+                        GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
+                        CharacterRE:FireServer("Focus")
+                        sent = sent + 1
+                        return (sent >= LIMIT)
+                    end
+                    for _, Egg in ipairs(OwnedEggData:GetChildren()) do
+                        if Egg and not Egg:FindFirstChild("DI") then
+                            if trySendFocus(Egg.Name) then break end
+                        end
+                    end
+                    if sent < LIMIT then
+                        for foodName, amount in pairs(invAttrs) do
+                            if table.find(PetFoods_InGame, foodName) and (tonumber(amount) or 0) > 0 then
+                                local canSend = math.max(0, math.min(tonumber(amount) or 0, LIMIT - sent))
+                                for _ = 1, canSend do
+                                    if trySendFocus(foodName) then break end
+                                end
+                                if sent >= LIMIT then break end
+                            end
+                        end
+                    end
+                elseif GiftType == "All_Foods" then
+                    if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                    for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
+                        if FoodName and table.find(PetFoods_InGame, FoodName) then
+                            for _ = 1, FoodAmount do
+                                CharacterRE:FireServer("Focus", FoodName) task.wait(0.75)
+                                GiftRE:FireServer(GiftPlayer)              task.wait(0.75)
+                                if sentOne() then break end
+                            end
+                            if sent >= LIMIT then break end
+                        end
+                    end
+                elseif GiftType == "Select_Foods" then
+                    if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
+                    local inv = InventoryData and InventoryData:GetAttributes() or {}
+                    local selected = Configuration.Players.Food_Selected or {}
+                    local amounts  = Configuration.Players.Food_Amounts  or {}
+                    for foodName, picked in pairs(selected) do
+                        if picked and table.find(PetFoods_InGame, foodName) then
+                            local have = tonumber(inv[foodName] or 0)
+                            local want = tonumber(amounts[foodName] or 1)
+                            local canSend = math.max(0, math.min(have, want, LIMIT - sent))
+                            for _ = 1, canSend do
+                                CharacterRE:FireServer("Focus", foodName) task.wait(0.75)
+                                GiftRE:FireServer(GiftPlayer)              task.wait(0.75)
+                                if sentOne() then break end
+                            end
+                            if sent >= LIMIT then break end
+                        end
+                    end
+                elseif GiftType == "All_Eggs" then
+                    for _, Egg in pairs(OwnedEggData:GetChildren()) do
+                        if Egg and not Egg:FindFirstChild("DI") then
+                            CharacterRE:FireServer("Focus", Egg.Name) task.wait(0.75)
+                            GiftRE:FireServer(GiftPlayer)             task.wait(0.75)
+                            if sentOne() then break end
+                        end
+                    end
+                elseif GiftType == "Match_Eggs" then
+                    local function isPicked(tbl, key)
+                        if type(tbl) ~= "table" then return false end
+                        if tbl[key] == true then return true end
+                        for _, v in ipairs(tbl) do if v == key then return true end end
+                        return false
+                    end
+                    local typeOn = next(Configuration.Players.Egg_Types)     ~= nil
+                    local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
+                    local buckets = {}
+                    for _, Egg in ipairs(OwnedEggData:GetChildren()) do
+                        if Egg and not Egg:FindFirstChild("DI") then
+                            local t = Egg:GetAttribute("T") or "BasicEgg"
+                            local m = Egg:GetAttribute("M") or "None"
+                            local okT = (not typeOn) or isPicked(Configuration.Players.Egg_Types, t)
+                            local okM = (mutOn and isPicked(Configuration.Players.Egg_Mutations, m))
+                                     or ((not mutOn) and (m == "None"))
+                            if okT and okM then
+                                buckets[m] = buckets[m] or {}
+                                table.insert(buckets[m], Egg.Name)
+                            end
+                        end
+                    end
+                    local function perMutationLimit()
+                        local n = tonumber(Configuration.Players.Gift_Limit)
+                        if not n or n <= 0 then return math.huge end
+                        return math.floor(n)
+                    end
+                    local PER_LIMIT = perMutationLimit()
+                    local order = {}
+                    if mutOn then
+                        if type(Configuration.Players.Egg_Mutations) == "table" and #Configuration.Players.Egg_Mutations > 0 then
+                            for _, m in ipairs(Configuration.Players.Egg_Mutations) do table.insert(order, m) end
+                        else
+                            for m, on in pairs(Configuration.Players.Egg_Mutations) do if on then table.insert(order, m) end end
+                        end
+                    else
+                        order = { "None" }
+                    end
+                    local totalSent = 0
+                    for _, m in ipairs(order) do
+                        local list = buckets[m] or {}
+                        local count = math.min(PER_LIMIT, #list)
+                        for i = 1, count do
+                            local uid = list[i]
+                            CharacterRE:FireServer("Focus", uid) task.wait(0.75)
+                            GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
+                            CharacterRE:FireServer("Focus")
+                            totalSent += 1
+                        end
+                    end
+                    if totalSent == 0 then
+                        Fluent:Notify({ Title = "Match_Eggs", Content = "ไม่พบไข่ที่ตรงเงื่อนไข (หรือถูกวางไว้แล้ว)", Duration = 4 })
+                    end
+                end
+                Configuration.Waiting = false
+            end },
+            { Title = "No" }
+        }
+    })
+end
+
+function DoSellNow()
+    local mode = Configuration.Sell.Mode or ""
+    if mode == "" then
+        Fluent:Notify({ Title = "Sell", Content = "กรุณาเลือก Sell Mode ก่อน", Duration = 5 })
+        return
+    end
+    Window:Dialog({
+        Title = "Confirm Sell",
+        Content = "แน่ใจหรือไม่ที่จะขายตามเงื่อนไขที่ตั้งไว้?",
+        Buttons = {
+            { Title = "Yes", Callback = function()
+                local okCnt, failCnt, total = 0, 0, 0
+                if mode == "All_Unplaced_Pets" then
+                    for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+                        local uid = petCfg.Name
+                        if not OwnedPets[uid] then
+                            total += 1
+                            local ok = select(1, SellPet(uid))
+                            if ok then okCnt += 1 else failCnt += 1 end
+                            task.wait(0.15)
+                        end
+                    end
+                elseif mode == "All_Unplaced_Eggs" then
+                    for _, egg in ipairs(OwnedEggData:GetChildren()) do
+                        if egg and not egg:FindFirstChild("DI") then
+                            total += 1
+                            local ok = select(1, SellEgg(egg.Name))
+                            if ok then okCnt += 1 else failCnt += 1 end
+                            task.wait(0.15)
+                        end
+                    end
+                elseif mode == "Filter_Eggs" then
+                    local typeOn = next(Configuration.Sell.Egg_Types)     ~= nil
+                    local mutOn  = next(Configuration.Sell.Egg_Mutations) ~= nil
+                    for _, egg in ipairs(OwnedEggData:GetChildren()) do
+                        if egg and not egg:FindFirstChild("DI") then
+                            local t = egg:GetAttribute("T") or "BasicEgg"
+                            local m = egg:GetAttribute("M") or "None"
+                            local okT = (not typeOn) or Configuration.Sell.Egg_Types[t]
+                            local okM = (mutOn and (Configuration.Sell.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
+                            if okT and okM then
+                                total += 1
+                                local ok = select(1, SellEgg(egg.Name))
+                                if ok then okCnt += 1 else failCnt += 1 end
+                                task.wait(0.15)
+                            end
+                        end
+                    end
+                elseif mode == "Pets_Below_Income" then
+                    local th = tonumber(Configuration.Sell.Pet_Income_Threshold) or 0
+                    for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
+                        local uid = petCfg.Name
+                        if not OwnedPets[uid] then
+                            local inc = tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0
+                            if inc < th then
+                                total += 1
+                                local ok = select(1, SellPet(uid))
+                                if ok then okCnt += 1 else failCnt += 1 end
+                                task.wait(0.15)
+                            end
+                        end
+                    end
+                end
+                Fluent:Notify({
+                    Title = "Sell Summary",
+                    Content = ("รวม %d | สำเร็จ %d | ล้มเหลว %d"):format(total, okCnt, failCnt),
+                    Duration = 7
+                })
+            end},
+            { Title = "No" }
+        }
+    })
+end
+
+--==============================================================
 --                      UI
 --==============================================================
 local Window = Fluent:CreateWindow({
@@ -1414,68 +1704,7 @@ Tabs.Pet:AddToggle("SmartPet", {
 Tabs.Pet:AddButton({
     Title = "Collect Pet",
     Description = "Collect Pets with Collect Pet Type (no BIG pet)",
-    Callback = function()
-        Window:Dialog({
-            Title = "Collect Pet Alert", Content = "Are you sure?",
-            Buttons = {
-                { Title = "Yes", Callback = function()
-                    local CollectType = Configuration.Pet.CollectPet_Type
-                    local areaWant = Configuration.Pet.CollectPet_Area
-                    local function passArea(uid)
-                        if areaWant == "Any" then return true end
-                        return petArea(uid) == areaWant
-                    end
-
-                    if CollectType == "All" then
-                        for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID) then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
-                            end
-                        end
-                    elseif CollectType == "Match Pet" then
-                        for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID)
-                               and Configuration.Pet.CollectPet_Pets[PetData.Type] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
-                            end
-                        end
-                    elseif CollectType == "Match Mutation" then
-                        for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID)
-                               and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
-                            end
-                        end
-                    elseif CollectType == "Match Pet&Mutation" then
-                        for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID)
-                               and Configuration.Pet.CollectPet_Pets[PetData.Type]
-                               and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
-                                if PetData.RE then PetData.RE:FireServer("Claim") end
-                                CharacterRE:FireServer("Del", UID)
-                            end
-                        end
-                    elseif CollectType == "Range" then
-                        local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
-                        local maxV = tonumber(Configuration.Pet.CollectPet_Between.Max) or math.huge
-                        for UID, PetData in pairs(OwnedPets) do
-                            if PetData and not PetData.IsBig and passArea(UID) then
-                                local ps = tonumber(PetData.ProduceSpeed) or 0
-                                if ps >= minV and ps <= maxV then
-                                    if PetData.RE then PetData.RE:FireServer("Claim") end
-                                    CharacterRE:FireServer("Del", UID)
-                                end
-                            end
-                        end
-                    end
-                end },
-                { Title = "No", Callback = function() end }
-            }
-        })
-    end
+    Callback = DoCollectPetOnce
 })
 
 Tabs.Pet:AddSection("Settings")
@@ -1594,7 +1823,6 @@ local FeedTargetsDD = Tabs.Pet:AddDropdown("Pet Feed_Targets", {
     end
 })
 
--- ตัวกรอง Collect/Place (UI คงเดิม)
 Tabs.Pet:AddDropdown("CollectPet Type",{ Title = "Collect Pet Type", Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation","Range"}, Multi = false, Default = "All", Callback = function(v) Configuration.Pet.CollectPet_Type = v end })
 Tabs.Pet:AddDropdown("CollectPet Area",{ Title = "Collect Pet Area", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Pet.CollectPet_Area = v end })
 Tabs.Pet:AddDropdown("CollectPet Pets",{ Title = "Collect Pets", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Pets = v end })
@@ -1602,7 +1830,7 @@ Tabs.Pet:AddDropdown("CollectPet Mutations",{ Title = "Collect Mutations", Value
 Tabs.Pet:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Min = tonumber(v) end })
 Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Max = tonumber(v) end })
 
--- ====== Pet > Auto Place Pet Settings (UI คงไว้) ======
+-- ====== Pet > Auto Place Pet Settings ======
 Tabs.Pet:AddSection("Auto Place Pet Settings")
 Tabs.Pet:AddDropdown("PlacePet Area", {
     Title = "Place Area (Pet)",
@@ -1656,7 +1884,6 @@ Tabs.Egg:AddToggle("Auto Egg",{ Title="Auto Buy Egg", Default=false, Callback=fu
     Configuration.Egg.AutoBuyEgg = v
     if v then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) else TaskMgr.stop("AutoBuyEgg") end
 end })
--- NOTE: Toggle เดิมคงไว้ แต่ตอน on จะสตาร์ทสตับ + toast
 Tabs.Egg:AddToggle("Auto Place Egg",{ Title="Auto Place Egg", Default=false, Callback=function(v)
     Configuration.Egg.AutoPlaceEgg = v
     if v then
@@ -1721,201 +1948,7 @@ Tabs.Event:AddSlider("Lottery_Delay", { Title = "Buy Ticket Delay (sec)", Defaul
 Tabs.Players:AddSection("Main")
 Tabs.Players:AddButton({
     Title = "Send Gift", Description = "Send Gift",
-    Callback = function()
-        Window:Dialog({
-            Title = "Send Gift Alert", Content = "Are you sure?",
-            Buttons = {
-                { Title = "Yes", Callback = function()
-                    local GiftRE = GameRemoteEvents:WaitForChild("GiftRE")
-                    local GiftType = Configuration.Players.SelectType
-                    local GiftPlayer = Players:FindFirstChild(Configuration.Players.SelectPlayer)
-                    if not GiftPlayer then return end
-
-                    local function _limit()
-                        local n = tonumber(Configuration.Players.Gift_Limit)
-                        return (n and n > 0) and n or math.huge
-                    end
-                    local LIMIT = _limit()
-                    local sent = 0
-                    local function sentOne()
-                        sent = sent + 1
-                        return sent >= LIMIT
-                    end
-
-                    Configuration.Waiting = true
-
-                    if GiftType == "All_Pets" then
-                        for _, PetData in pairs(OwnedPetData:GetChildren()) do
-                            if PetData and not PetData:GetAttribute("D") then
-                                CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
-                                GiftRE:FireServer(GiftPlayer) task.wait(0.75)
-                                if sentOne() then break end
-                            end
-                        end
-                    elseif GiftType == "Range_Pets" then
-                        local minV = tonumber(Configuration.Players.GiftPet_Between.Min) or 0
-                        local maxV = tonumber(Configuration.Players.GiftPet_Between.Max) or math.huge
-                        for _, PetData in pairs(OwnedPetData:GetChildren()) do
-                            if PetData and not PetData:GetAttribute("D") then
-                                local uid = PetData.Name
-                                if not OwnedPets[uid] then
-                                    local inc = GetInventoryIncomePerSecByUID(uid)
-                                    if inc and inc >= minV and inc <= maxV then
-                                        CharacterRE:FireServer("Focus", uid) task.wait(0.75)
-                                        GiftRE:FireServer(GiftPlayer)      task.wait(0.75)
-                                        if sentOne() then break end
-                                    end
-                                end
-                            end
-                        end
-                    elseif GiftType == "Match Pet" then
-                        for _, PetData in pairs(OwnedPetData:GetChildren()) do
-                            if PetData then
-                                local petType = PetData:GetAttribute("T")
-                                if petType and Configuration.Players.Pet_Type[petType] then
-                                    CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
-                                    GiftRE:FireServer(GiftPlayer)                   task.wait(0.75)
-                                    if sentOne() then break end
-                                end
-                            end
-                        end
-                    elseif GiftType == "Match Pet&Mutation" then
-                        for _, PetData in pairs(OwnedPetData:GetChildren()) do
-                            if PetData then
-                                local t = PetData:GetAttribute("T")
-                                local m = PetData:GetAttribute("M") or "None"
-                                if t and m and Configuration.Players.Pet_Type[t] and Configuration.Players.Pet_Mutations[m] then
-                                    CharacterRE:FireServer("Focus", PetData.Name) task.wait(0.75)
-                                    GiftRE:FireServer(GiftPlayer)                   task.wait(0.75)
-                                    if sentOne() then break end
-                                end
-                            end
-                        end
-                    elseif GiftType == "All_Eggs_And_Foods" then
-                        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
-                        local invAttrs = (InventoryData and InventoryData:GetAttributes()) or {}
-                        local function trySendFocus(name)
-                            CharacterRE:FireServer("Focus", name) task.wait(0.75)
-                            GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
-                            CharacterRE:FireServer("Focus")
-                            sent = sent + 1
-                            return (sent >= LIMIT)
-                        end
-                        for _, Egg in ipairs(OwnedEggData:GetChildren()) do
-                            if Egg and not Egg:FindFirstChild("DI") then
-                                if trySendFocus(Egg.Name) then break end
-                            end
-                        end
-                        if sent < LIMIT then
-                            for foodName, amount in pairs(invAttrs) do
-                                if table.find(PetFoods_InGame, foodName) and (tonumber(amount) or 0) > 0 then
-                                    local canSend = math.max(0, math.min(tonumber(amount) or 0, LIMIT - sent))
-                                    for _ = 1, canSend do
-                                        if trySendFocus(foodName) then break end
-                                    end
-                                    if sent >= LIMIT then break end
-                                end
-                            end
-                        end
-                    elseif GiftType == "All_Foods" then
-                        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
-                        for FoodName,FoodAmount in pairs(InventoryData:GetAttributes()) do
-                            if FoodName and table.find(PetFoods_InGame, FoodName) then
-                                for _ = 1, FoodAmount do
-                                    CharacterRE:FireServer("Focus", FoodName) task.wait(0.75)
-                                    GiftRE:FireServer(GiftPlayer)              task.wait(0.75)
-                                    if sentOne() then break end
-                                end
-                                if sent >= LIMIT then break end
-                            end
-                        end
-                    elseif GiftType == "Select_Foods" then
-                        if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
-                        local inv = InventoryData and InventoryData:GetAttributes() or {}
-                        local selected = Configuration.Players.Food_Selected or {}
-                        local amounts  = Configuration.Players.Food_Amounts  or {}
-                        for foodName, picked in pairs(selected) do
-                            if picked and table.find(PetFoods_InGame, foodName) then
-                                local have = tonumber(inv[foodName] or 0)
-                                local want = tonumber(amounts[foodName] or 1)
-                                local canSend = math.max(0, math.min(have, want, LIMIT - sent))
-                                for _ = 1, canSend do
-                                    CharacterRE:FireServer("Focus", foodName) task.wait(0.75)
-                                    GiftRE:FireServer(GiftPlayer)              task.wait(0.75)
-                                    if sentOne() then break end
-                                end
-                                if sent >= LIMIT then break end
-                            end
-                        end
-                    elseif GiftType == "All_Eggs" then
-                        for _, Egg in pairs(OwnedEggData:GetChildren()) do
-                            if Egg and not Egg:FindFirstChild("DI") then
-                                CharacterRE:FireServer("Focus", Egg.Name) task.wait(0.75)
-                                GiftRE:FireServer(GiftPlayer)             task.wait(0.75)
-                                if sentOne() then break end
-                            end
-                        end
-                    elseif GiftType == "Match_Eggs" then
-                        local function isPicked(tbl, key)
-                            if type(tbl) ~= "table" then return false end
-                            if tbl[key] == true then return true end
-                            for _, v in ipairs(tbl) do if v == key then return true end end
-                            return false
-                        end
-                        local typeOn = next(Configuration.Players.Egg_Types)     ~= nil
-                        local mutOn  = next(Configuration.Players.Egg_Mutations) ~= nil
-                        local buckets = {}
-                        for _, Egg in ipairs(OwnedEggData:GetChildren()) do
-                            if Egg and not Egg:FindFirstChild("DI") then
-                                local t = Egg:GetAttribute("T") or "BasicEgg"
-                                local m = Egg:GetAttribute("M") or "None"
-                                local okT = (not typeOn) or isPicked(Configuration.Players.Egg_Types, t)
-                                local okM = (mutOn and isPicked(Configuration.Players.Egg_Mutations, m))
-                                         or ((not mutOn) and (m == "None"))
-                                if okT and okM then
-                                    buckets[m] = buckets[m] or {}
-                                    table.insert(buckets[m], Egg.Name)
-                                end
-                            end
-                        end
-                        local function perMutationLimit()
-                            local n = tonumber(Configuration.Players.Gift_Limit)
-                            if not n or n <= 0 then return math.huge end
-                            return math.floor(n)
-                        end
-                        local PER_LIMIT = perMutationLimit()
-                        local order = {}
-                        if mutOn then
-                            if type(Configuration.Players.Egg_Mutations) == "table" and #Configuration.Players.Egg_Mutations > 0 then
-                                for _, m in ipairs(Configuration.Players.Egg_Mutations) do table.insert(order, m) end
-                            else
-                                for m, on in pairs(Configuration.Players.Egg_Mutations) do if on then table.insert(order, m) end end
-                            end
-                        else
-                            order = { "None" }
-                        end
-                        local totalSent = 0
-                        for _, m in ipairs(order) do
-                            local list = buckets[m] or {}
-                            local count = math.min(PER_LIMIT, #list)
-                            for i = 1, count do
-                                local uid = list[i]
-                                CharacterRE:FireServer("Focus", uid) task.wait(0.75)
-                                GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
-                                CharacterRE:FireServer("Focus")
-                                totalSent += 1
-                            end
-                        end
-                        if totalSent == 0 then
-                            Fluent:Notify({ Title = "Match_Eggs", Content = "ไม่พบไข่ที่ตรงเงื่อนไข (หรือถูกวางไว้แล้ว)", Duration = 4 })
-                        end
-                    end
-                    Configuration.Waiting = false
-                end },
-                { Title = "No" }
-            }
-        })
-    end
+    Callback = DoSendGift
 })
 Tabs.Players:AddSection("Settings")
 local Players_Dropdown = Tabs.Players:AddDropdown("Players Dropdown",{ Title = "Select Player", Values = Players_InGame, Multi = false, Default = "", Callback = function(v) Configuration.Players.SelectPlayer = v end })
@@ -2045,79 +2078,7 @@ Tabs.Sell:AddInput("Pet Income Threshold", {
 Tabs.Sell:AddButton({
     Title = "Sell Now",
     Description = "ขายตามโหมดและตัวกรองที่ตั้งไว้",
-    Callback = function()
-        local mode = Configuration.Sell.Mode or ""
-        if mode == "" then
-            Fluent:Notify({ Title = "Sell", Content = "กรุณาเลือก Sell Mode ก่อน", Duration = 5 })
-            return
-        end
-        Window:Dialog({
-            Title = "Confirm Sell",
-            Content = "แน่ใจหรือไม่ที่จะขายตามเงื่อนไขที่ตั้งไว้?",
-            Buttons = {
-                { Title = "Yes", Callback = function()
-                    local okCnt, failCnt, total = 0, 0, 0
-                    if mode == "All_Unplaced_Pets" then
-                        for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
-                            local uid = petCfg.Name
-                            if not OwnedPets[uid] then
-                                total += 1
-                                local ok = select(1, SellPet(uid))
-                                if ok then okCnt += 1 else failCnt += 1 end
-                                task.wait(0.15)
-                            end
-                        end
-                    elseif mode == "All_Unplaced_Eggs" then
-                        for _, egg in ipairs(OwnedEggData:GetChildren()) do
-                            if egg and not egg:FindFirstChild("DI") then
-                                total += 1
-                                local ok = select(1, SellEgg(egg.Name))
-                                if ok then okCnt += 1 else failCnt += 1 end
-                                task.wait(0.15)
-                            end
-                        end
-                    elseif mode == "Filter_Eggs" then
-                        local typeOn = next(Configuration.Sell.Egg_Types)     ~= nil
-                        local mutOn  = next(Configuration.Sell.Egg_Mutations) ~= nil
-                        for _, egg in ipairs(OwnedEggData:GetChildren()) do
-                            if egg and not egg:FindFirstChild("DI") then
-                                local t = egg:GetAttribute("T") or "BasicEgg"
-                                local m = egg:GetAttribute("M") or "None"
-                                local okT = (not typeOn) or Configuration.Sell.Egg_Types[t]
-                                local okM = (mutOn and (Configuration.Sell.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
-                                if okT and okM then
-                                    total += 1
-                                    local ok = select(1, SellEgg(egg.Name))
-                                    if ok then okCnt += 1 else failCnt += 1 end
-                                    task.wait(0.15)
-                                end
-                            end
-                        end
-                    elseif mode == "Pets_Below_Income" then
-                        local th = tonumber(Configuration.Sell.Pet_Income_Threshold) or 0
-                        for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
-                            local uid = petCfg.Name
-                            if not OwnedPets[uid] then
-                                local inc = tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0
-                                if inc < th then
-                                    total += 1
-                                    local ok = select(1, SellPet(uid))
-                                    if ok then okCnt += 1 else failCnt += 1 end
-                                    task.wait(0.15)
-                                end
-                            end
-                        end
-                    end
-                    Fluent:Notify({
-                        Title = "Sell Summary",
-                        Content = ("รวม %d | สำเร็จ %d | ล้มเหลว %d"):format(total, okCnt, failCnt),
-                        Duration = 7
-                    })
-                end},
-                { Title = "No" }
-            }
-        })
-    end
+    Callback = DoSellNow
 })
 
 --============================== About / Settings =================
