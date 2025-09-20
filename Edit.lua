@@ -344,15 +344,17 @@ table.insert(EnvirontmentConnections,Egg_Belt_Folder.ChildAdded:Connect(function
     end
 end))
 for _,egg in pairs(Egg_Belt_Folder:GetChildren()) do
-    task.spawn(pcall,function()
-        local eggUID = tostring(egg) or "None"
-        if egg then
-            Egg_Belt[eggUID] = {
-                UID = eggUID,
-                Mutate = (egg:GetAttribute("M") or "None"),
-                Type = (egg:GetAttribute("T") or "BasicEgg")
-            }
-        end
+    task.spawn(function()
+        pcall(function()
+            local eggUID = tostring(egg) or "None"
+            if egg then
+                Egg_Belt[eggUID] = {
+                    UID = eggUID,
+                    Mutate = (egg:GetAttribute("M") or "None"),
+                    Type = (egg:GetAttribute("T") or "BasicEgg")
+                }
+            end
+        end)
     end)
 end
 
@@ -823,7 +825,7 @@ local function __getFilteredInventoryUidsSortedDesc()
     if #uids == 0 then return {} end
 
     local inc = {}
-    for i = 1; #uids; i = i + 1 do
+    for i = 1, #uids, 1 do
         local uid = uids[i]
         inc[uid] = GetIncomeFast(uid) or 0
     end
@@ -904,7 +906,7 @@ local function runAutoPlacePet(tok)
                     ok = select(1, __replacePetAtTile(worstUid, bestUid, worstTilePart))
                 end
                 table.remove(invUids, 1)
-                tries += (ok and 1 or 1)
+                tries = tries + 1
                 if #invUids == 0 then break end
                 task.wait(0.1)
             end
@@ -1033,7 +1035,7 @@ local function runAutoCollect(tok)
             local RE = pet and pet.RE
             if RE then
                 RE:FireServer("Claim")
-                claimed += 1
+                claimed = claimed + 1
                 if claimed % 8 == 0 then task.wait() end
             end
         end
@@ -1817,7 +1819,7 @@ Tabs.Players:AddButton({
                                 CharacterRE:FireServer("Focus", uid) task.wait(0.75)
                                 GiftRE:FireServer(GiftPlayer)         task.wait(0.75)
                                 CharacterRE:FireServer("Focus")
-                                totalSent += 1
+                                totalSent = totalSent + 1
                             end
                         end
                         if totalSent == 0 then
@@ -1975,7 +1977,7 @@ Tabs.Sell:AddButton({
                         for _, petCfg in ipairs(OwnedPetData:GetChildren()) do
                             local uid = petCfg.Name
                             if not OwnedPets[uid] then
-                                total += 1
+                                total = total + 1
                                 local ok = select(1, SellPet(uid))
                                 if ok then okCnt += 1 else failCnt += 1 end
                                 task.wait(0.15)
@@ -1984,7 +1986,7 @@ Tabs.Sell:AddButton({
                     elseif mode == "All_Unplaced_Eggs" then
                         for _, egg in ipairs(OwnedEggData:GetChildren()) do
                             if egg and not egg:FindFirstChild("DI") then
-                                total += 1
+                                total = total + 1
                                 local ok = select(1, SellEgg(egg.Name))
                                 if ok then okCnt += 1 else failCnt += 1 end
                                 task.wait(0.15)
@@ -2000,7 +2002,7 @@ Tabs.Sell:AddButton({
                                 local okT = (not typeOn) or Configuration.Sell.Egg_Types[t]
                                 local okM = (mutOn and (Configuration.Sell.Egg_Mutations[m] == true)) or ((not mutOn) and (m == "None"))
                                 if okT and okM then
-                                    total += 1
+                                    total = total + 1
                                     local ok = select(1, SellEgg(egg.Name))
                                     if ok then okCnt += 1 else failCnt += 1 end
                                     task.wait(0.15)
@@ -2014,7 +2016,7 @@ Tabs.Sell:AddButton({
                             if not OwnedPets[uid] then
                                 local inc = tonumber(GetInventoryIncomePerSecByUID(uid) or 0) or 0
                                 if inc < th then
-                                    total += 1
+                                    total = total + 1
                                     local ok = select(1, SellPet(uid))
                                     if ok then okCnt += 1 else failCnt += 1 end
                                     task.wait(0.15)
