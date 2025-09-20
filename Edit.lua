@@ -54,7 +54,7 @@ local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 local OwnedPets = {}
 local Egg_Belt = {}
 local Configuration
-
+local Options
 -- ==== DEBUG flags ====
 local G = getgenv()
 G.MEOWY_DBG = G.MEOWY_DBG or { on = true, toast = false }
@@ -819,13 +819,21 @@ local function __placeOnePetToPos(uid, worldPos)
 end
 
 -- == วางสัตว์ตัวเดียวลง tile ว่าง (คืนค่า: ok, msg)
-local function placePetOnFreeTile(uid, area, pickMode)
+local function placePetOnFreeTile(uid, area)
     if not uid or uid == "" then return false, "no uid" end
-    local tile = __pickFreeTile(area or Configuration.Pet.PlaceArea or "Any", pickMode or "near-player")
+    local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
+    local occ  = __occupiedKeysFromPets_fast()
+    local tile
+    for i = 1, #pool do
+        local part = pool[i]
+        local k = _keyXZ(part.Position.X, part.Position.Z)
+        if not occ[k] then tile = { pos = part.Position } break end
+    end
     if not tile then return false, "no free tile" end
     local ok = __placeOnePetToPos(uid, tile.pos)
     return ok, ok and "placed" or "no confirm"
 end
+
 
 local function runAutoPlacePet(tok)
     while tok.alive do
@@ -1218,7 +1226,7 @@ local Tabs = {
     Inv = Window:AddTab({ Title = "Inventory" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
 }
-local Options = Fluent.Options
+    Options = Fluent.Options
 
 --============================== Main ==============================
 Tabs.Main:AddSection("Main")
