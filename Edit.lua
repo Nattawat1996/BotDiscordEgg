@@ -375,7 +375,7 @@ local function _buildOwnedPetEntry(pet, petUID)
         if not root then return nil end
         local gui = root:FindFirstChild("GUI") or root:FindFirstChildWhichIsA("BillboardGui", true)
         local idle = gui and (gui:FindFirstChild("IdleGUI") or gui:FindFirstChildWhichIsA("Frame", true))
-        local cf   = idle and (cf or idle:FindFirstChild("CashF") or idle:FindFirstChildWhichIsA("Frame", true))
+        local cf = idle and (idle:FindFirstChild("CashF") or idle:FindFirstChildWhichIsA("Frame", true))
         local txt  = cf and (cf:FindFirstChild("TXT")   or cf:FindFirstChildWhichIsA("TextLabel", true))
         _cashTxtRef = txt
         return txt
@@ -676,40 +676,29 @@ local function _waitAlive(tok, sec)
 end
 
 --==============================================================
---            AUTO PLACE PET (GridCenterPos-based)
+--        GRID HELPERS (SHARED FOR PETS & EGGS)
 --==============================================================
-local function __tileCenterPos(tilePart)
+local function Grid_round(n) return math.floor((tonumber(n) or 0) + 0.5) end
+local function Grid_keyXZ(x,z) return string.format("%d,%d", Grid_round(x), Grid_round(z)) end
+
+local function Grid_TileCenterPos(tilePart)
     local p = tilePart
     local cx = math.floor(p.Position.X + 0.5)
     local cz = math.floor(p.Position.Z + 0.5)
     local cy = p.Position.Y + (p.Size.Y * 0.5)
     return Vector3.new(cx, cy, cz)
 end
-local function __round(n) return math.floor((tonumber(n) or 0) + 0.5) end
-local function __keyXZ(x,z) return string.format("%d,%d", __round(x), __round(z)) end
-local function __getAttrs(inst) local ok, a = pcall(function() return inst:GetAttributes() end); return ok and a or {} end
-local function __parseGCP(v)
-    if typeof(v) == "Vector3" then return v end
-    if type(v) == "table" then
-        local x = v.X or v.x or v[1] or 0
-        local y = v.Y or v.y or v[2] or 0
-        local z = v.Z or v.z or v[3] or 0
-        return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
-    end
-    if type(v) == "string" then
-        local x,y,z = v:match("%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*,%s*([%-%d%.]+)%s*")
-        return Vector3.new(tonumber(x) or 0, tonumber(y) or 0, tonumber(z) or 0)
-    end
-    return nil
-end
 
-local function _dist2(a, b)
+local function Grid_Dist2(a, b)
     local dx, dy, dz = a.X - b.X, a.Y - b.Y, a.Z - b.Z
     return dx*dx + dy*dy + dz*dz
 end
 
-local function __occupiedKeysFromPets_fast()
+-- สร้างชุด “ช่องที่ถูกยึด” จากสัตว์ (และไข่ที่ถูกวาง)
+local function Grid_OccupiedKeys()
     local keys = {}
+
+    -- จากสัตว์ที่เราวางอยู่ (เร็ว)
     for _, m in ipairs(MyPets_List) do
         local root = m.PrimaryPart or m:FindFirstChild("RootPart")
         local gcp = root and root:GetAttribute("GridCenterPos") or m:GetAttribute("GridCenterPos")
@@ -719,19 +708,30 @@ local function __occupiedKeysFromPets_fast()
                 gcp.Y or gcp.y or gcp[2] or 0,
                 gcp.Z or gcp.z or gcp[3] or 0
             )
-            keys[_keyXZ(v.X, v.Z)] = true
+            keys[Grid_keyXZ(v.X, v.Z)] = true
         end
     end
+
+    -- จากไข่ที่ “ถูกวางแล้ว” (อ่านจาก Data -> Egg -> DI)
+    for _, eggNode in ipairs(OwnedEggData:GetChildren()) do
+        local di = eggNode:FindFirstChild("DI")
+        if di then
+            local x, z = di:GetAttribute("X") or 0, di:GetAttribute("Z") or 0
+            keys[Grid_keyXZ(x, z)] = true
+        end
+    end
+
     return keys
 end
 
-local function __buildFreeList(area)
-    local occ = __occupiedKeysFromPets_fast()
+-- รายการช่องว่างตามพื้นที่ (Any/Land/Water)
+local function Grid_FreeList(area)
+    local occ = Grid_OccupiedKeys()
     local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
     local free = {}
     for i = 1, #pool do
         local part = pool[i]
-        local k = _keyXZ(part.Position.X, part.Position.Z)
+        local k = Grid_keyXZ(part.Position.X, part.Position.Z)
         if not occ[k] then
             free[#free+1] = { part = part, pos = part.Position, key = k }
         end
@@ -739,26 +739,20 @@ local function __buildFreeList(area)
     return free
 end
 
-local function __pickIndexFromFreeList(freeList, mode, hrpPos)
+-- เลือกช่องว่าง: "first" หรือ "near-hrp"
+local function Grid_PickIndex(freeList, mode, hrpPos)
     if #freeList == 0 then return nil, nil end
     if mode == "first" or not hrpPos then return 1, freeList[1] end
     local bestIdx, bestD2
     for i = 1, #freeList do
-        local d2 = _dist2(freeList[i].pos, hrpPos)
+        local d2 = Grid_Dist2(freeList[i].pos, hrpPos)
         if not bestD2 or d2 < bestD2 then bestIdx, bestD2 = i, d2 end
     end
     return bestIdx or 1, freeList[bestIdx or 1]
 end
 
-local function __getUnplacedPetUIDs()
-    local uids = {}
-    for _, petNode in ipairs(OwnedPetData:GetChildren()) do
-        if not Pet_Folder:FindFirstChild(petNode.Name) then
-            table.insert(uids, petNode.Name)
-        end
-    end
-    return uids
-end
+
+
 
 local function __filterPetsForPlacing(list, inc_map)
     local mode = Configuration.Pet.PlacePet_Mode or "All"
@@ -801,15 +795,9 @@ end
 
 local function placePetOnFreeTile(uid, area)
     if not uid or uid == "" then return false, "no uid" end
-    local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
-    local occ  = __occupiedKeysFromPets_fast()
-    local part
-    for i = 1, #pool do
-        local k = _keyXZ(pool[i].Position.X, pool[i].Position.Z)
-        if not occ[k] then part = pool[i]; break end
-    end
-    if not part then return false, "no free tile" end
-    local dst = __tileCenterPos(part)
+    local freeList = Grid_FreeList(area)
+    if #freeList == 0 then return false, "no free tile" end
+    local dst = Grid_TileCenterPos(freeList[1].part)
     local ok  = __placeOnePetToPos(uid, dst)
     return ok, ok and "placed" or "no confirm"
 end
@@ -870,7 +858,7 @@ local function __replacePetAtTile(oldUid, newUid, tilePart)
         return false, "skip-big"
     end
     if not tilePart then return false, "no tile" end
-    local dst = __tileCenterPos(tilePart)
+    local dst = Grid_TileCenterPos(tilePart)
 
     if Pold and Pold.RE then pcall(function() Pold.RE:FireServer("Claim") end) end
     CharacterRE:FireServer("Del", oldUid)
@@ -885,134 +873,133 @@ local function __replacePetAtTile(oldUid, newUid, tilePart)
     return ok, ok and "replaced" or "place-failed"
 end
 
-
 local function runAutoPlacePet(tok)
     while tok.alive do
-        local area = Configuration.Pet.PlaceArea or "Any"
-        local function __smartPassOnce(limitReplace)
-            if not Configuration.Pet.SmartPet then return end
-            local area = Configuration.Pet.PlaceArea or "Any"
-            local invUids, incMap = __getFilteredInventoryUidsSortedDesc()
-            if not invUids or #invUids == 0 then return end
-            local tries = 0
-            while tries < (limitReplace or 3) do
-                local worstUid, worstInc, _, worstTilePart = __findWorstPlacedPetInArea(area)
-                if not worstUid then break end
-                local bestUid = invUids[1]
-                local bestInc = (bestUid and incMap and incMap[bestUid]) or (bestUid and GetIncomeFast(bestUid)) or 0
-                if not bestUid or (bestInc <= (worstInc or 0)) then break end
-                local ok = false
-                if worstTilePart then
-                    ok = select(1, __replacePetAtTile(worstUid, bestUid, worstTilePart))
-                end
-                table.remove(invUids, 1)
-                tries = tries + 1
-                if #invUids == 0 then break end
-                task.wait(0.1)
-            end
-        end
-        __smartPassOnce(1)
-        local freeList = (function()
-            local keys = __occupiedKeysFromPets_fast()
-            local pool = (area == "Land" or area == "Water") and SortedPlots[area] or SortedPlots.Any
-            local free = {}
-            for i = 1, #pool do
-                local part = pool[i]
-                local k = _keyXZ(part.Position.X, part.Position.Z)
-                if not keys[k] then
-                    free[#free+1] = { part = part, pos = part.Position, key = k }
-                end
-            end
-            return free
-        end)()
+        -- [ขั้นตอนที่ 1] คำนวณครั้งใหญ่: หาสัตว์ที่ต้องวางทั้งหมดและเรียงลำดับ
+        Fluent:Notify({ Title = "Auto Place Pet", Content = "กำลังรวบรวมและจัดเรียงสัตว์...", Duration = 3 })
+        local uidsToPlace, incMap = __getFilteredInventoryUidsSortedDesc()
 
-        if #freeList == 0 then
-            if not Configuration.Pet.SmartPet then
-                Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างให้วางสัตว์แล้ว • ปิด Auto Place ให้", Duration = 5 })
-                pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
-                TaskMgr.stop("AutoPlacePet")
-                break
-            else
+        if #uidsToPlace > 0 then
+            dprint("[AutoPlacePet] พบสัตว์ที่ต้องวาง", #uidsToPlace, "ตัว. เริ่มกระบวนการวาง...")
+
+            -- [ขั้นตอนที่ 2] ทยอยวางสัตว์จากลิสต์ที่เตรียมไว้ (ใช้ for loop แทน)
+            for i = 1, #uidsToPlace do
+                if not tok.alive then break end
+
+                local wasActionTaken = false -- ตัวแปรเช็คว่ามีการวาง/สลับสัตว์ในรอบนี้หรือยัง
+
+                -- SmartPet Pass: ตรวจสอบว่าควรจะสลับสัตว์หรือไม่
+                if Configuration.Pet.SmartPet then
+                    local area = Configuration.Pet.PlaceArea or "Any"
+                    local worstUid, worstInc, _, worstTilePart = __findWorstPlacedPetInArea(area)
+                    local bestUid = uidsToPlace[i] -- ใช้สัตว์ตัวปัจจุบันในลูป
+                    local bestInc = (bestUid and incMap[bestUid]) or 0
+
+                    if worstUid and bestInc > worstInc then
+                        dprint(("[SmartPet] พบตัวที่ดีกว่า! Best: %s (%d) > Worst: %s (%d)"):format(tostring(bestUid), bestInc, tostring(worstUid), worstInc))
+                        local ok, reason = __replacePetAtTile(worstUid, bestUid, worstTilePart)
+                        dprint("[SmartPet] Replace result:", ok, reason)
+                        wasActionTaken = true -- ถือว่ามีการทำงานแล้ว
+                    end
+                end
+
+                -- Normal Placement Pass: วางสัตว์ในช่องที่ว่าง (ถ้ายังไม่มีการสลับ)
+                if not wasActionTaken then
+                    local area = Configuration.Pet.PlaceArea or "Any"
+                    local freeList = Grid_FreeList(area)
+
+                    if #freeList > 0 then
+                        local uidToPlace = uidsToPlace[i]
+                        local tile = freeList[1].part
+                        local dst = Grid_TileCenterPos(tile)
+                        __placeOnePetToPos(uidToPlace, dst)
+                    else
+                        -- ไม่มีที่ว่างแล้ว และ SmartPet ก็ไม่ได้ทำงาน
+                        if not Configuration.Pet.SmartPet then
+                           Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างแล้ว หยุดการวาง", Duration = 5 })
+                        end
+                        break -- ออกจาก for loop เพราะไม่มีที่ว่างเหลือให้วางแล้ว
+                    end
+                end
+
+                -- รอดีเลย์ตามที่ตั้งค่าไว้ก่อนจะไปทำกับสัตว์ตัวถัดไป
                 if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
             end
         else
-            local uids = {}
-            for _, petNode in ipairs(OwnedPetData:GetChildren()) do
-                local uid = petNode.Name
-                if not Pet_Folder:FindFirstChild(uid) then
-                    uids[#uids+1] = uid
-                end
-            end
-            if #uids > 0 then
-                local inc_by_uid = {}
-                for i = 1, #uids do
-                    local uid = uids[i]
-                    inc_by_uid[uid] = GetIncomeFast(uid)
-                end
-                table.sort(uids, function(a,b)
-                    return (inc_by_uid[a] or 0) > (inc_by_uid[b] or 0)
-                end)
-                uids = (function(list, inc_map)
-                    local mode = Configuration.Pet.PlacePet_Mode or "All"
-                    if mode == "All" then return list end
-                    local out = {}
-                    for _, uid in ipairs(list) do
-                        local petNode = OwnedPetData:FindFirstChild(uid)
-                        if petNode then
-                            if mode == "Match" then
-                                local t = petNode:GetAttribute("T")
-                                local m = petNode:GetAttribute("M") or "None"
-                                if (Configuration.Pet.PlacePet_Types[t]) and (Configuration.Pet.PlacePet_Mutations[m]) then
-                                    out[#out+1] = uid
-                                end
-                            elseif mode == "Range" then
-                                local inc = inc_map and inc_map[uid]
-                                if inc == nil then inc = GetInventoryIncomePerSecByUID(uid) end
-                                local mn = tonumber(Configuration.Pet.PlacePet_Between.Min) or 0
-                                local mx = tonumber(Configuration.Pet.PlacePet_Between.Max) or math.huge
-                                if inc >= mn and inc <= mx then
-                                    out[#out+1] = uid
-                                end
-                            end
-                        end
-                    end
-                    return out
-                end)(uids, inc_by_uid)
-                for _, uid in ipairs(uids) do
-                    if not tok.alive then break end
-                    if #freeList == 0 then
-                        Fluent:Notify({ Title = "Auto Place Pet", Content = "พื้นที่ว่างหมดระหว่างการวาง • ปิด Auto Place ให้", Duration = 5 })
-                        pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
-                        TaskMgr.stop("AutoPlacePet")
-                        tok.alive = false
-                        break
-                    end
-                    local idx, node = 1, freeList[1]
-                    task.wait(0.15)
-                    CharacterRE:FireServer("Focus", uid)
-                    task.wait(0.25)
-                    local dst = __tileCenterPos(node.part)
-                    CharacterRE:FireServer("Place", { DST = dst, ID = uid })
-                    task.wait(0.75)
-                    CharacterRE:FireServer("Focus")
-                    local ok = Pet_Folder:WaitForChild(uid, 2) ~= nil
-                    dprint("[AutoPlacePet]", uid, ok and "OK" or "FAIL")
-                    if ok then table.remove(freeList, idx) end
-                    task.wait(0.1)
-                end
-            end
+            -- ถ้าไม่มีสัตว์ให้วาง ก็แค่แจ้งเตือน
+            Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่พบสัตว์ที่ตรงตามเงื่อนไขให้วาง", Duration = 4 })
         end
-        if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end        
+
+        -- [ขั้นตอนที่ 3] เสร็จสิ้นการวาง: รอสักพักใหญ่ๆ ก่อนเริ่มรอบใหม่
+        dprint("[AutoPlacePet] สิ้นสุดรอบการทำงาน. รอ 30 วินาทีเพื่อเริ่มรอบใหม่...")
+        if not _waitAlive(tok, 30) then break end
     end
 end
 
+--================== โค้ดแก้ไข AutoPlaceEgg (ประสิทธิภาพสูง) ==================
 local function runAutoPlaceEgg(tok)
-    dprint("[AutoPlaceEgg] temporarily disabled (stub).")
     while tok.alive do
-        if not _waitAlive(tok, tonumber(Configuration.Egg.AutoPlaceEgg_Delay) or 1) then break end
-        break
+        -- [ขั้นตอนที่ 1] รวบรวมและกรองไข่ที่ต้องวางทั้งหมด "แค่ครั้งเดียว"
+        Fluent:Notify({ Title = "Auto Place Egg", Content = "กำลังรวบรวมไข่ที่ต้องวาง...", Duration = 3 })
+        local eggsToPlace = {}
+        for _, eggNode in ipairs(OwnedEggData:GetChildren()) do
+            if eggNode and not eggNode:FindFirstChild("DI") then
+                local t = eggNode:GetAttribute("T") or "BasicEgg"
+                local m = eggNode:GetAttribute("M") or "None"
+
+                local typePicked = (next(Configuration.Egg.Types) == nil) or (Configuration.Egg.Types[t] == true)
+                local mutPicked  = (next(Configuration.Egg.Mutations) == nil) or (Configuration.Egg.Mutations[m] == true)
+
+                if typePicked and mutPicked then
+                    table.insert(eggsToPlace, eggNode.Name)
+                end
+            end
+        end
+
+        -- [ขั้นตอนที่ 2] ตรวจสอบว่ามีไข่ให้วางหรือไม่
+        if #eggsToPlace > 0 then
+            dprint("[AutoPlaceEgg] พบไข่ที่ต้องวาง", #eggsToPlace, "ฟอง. เริ่มกระบวนการวาง...")
+
+            -- [ขั้นตอนที่ 3] วนลูปตามลิสต์ที่เตรียมไว้ เพื่อทยอยวางทีละฟอง
+            for _, uid in ipairs(eggsToPlace) do
+                if not tok.alive then break end
+
+                -- หาช่องว่าง "เท่าที่จำเป็น" ในแต่ละรอบ
+                local area = Configuration.Egg.PlaceArea or "Any"
+                local freeList = Grid_FreeList(area)
+
+                if #freeList == 0 then
+                    Fluent:Notify({ Title = "Auto Place Egg", Content = "ไม่มีพื้นที่ว่างให้วางไข่แล้ว", Duration = 4 })
+                    break -- ออกจาก for loop ทันที เพราะไม่มีที่ว่าง
+                end
+
+                -- ทำการวางไข่
+                local node = freeList[1]
+                task.wait(0.2)
+                CharacterRE:FireServer("Focus", uid)
+                task.wait(0.25)
+                local dst = Grid_TileCenterPos(node.part)
+                CharacterRE:FireServer("Place", { DST = dst, ID = uid })
+                task.wait(0.75)
+                CharacterRE:FireServer("Focus")
+
+                local ok = BlockFolder:WaitForChild(uid, 2) ~= nil
+                dprint("[AutoPlaceEgg]", uid, ok and "OK" or "FAIL")
+
+                -- รอดีเลย์สั้นๆ ก่อนวางฟองต่อไป
+                if not _waitAlive(tok, tonumber(Configuration.Egg.AutoPlaceEgg_Delay) or 1) then break end
+            end
+        else
+            Fluent:Notify({ Title = "Auto Place Egg", Content = "ไม่พบไข่ที่ตรงตามเงื่อนไขให้วาง", Duration = 4 })
+        end
+
+        -- [ขั้นตอนที่ 4] เมื่อวางหมด หรือ ไม่มีไข่ให้วาง ให้รอสักพักใหญ่ๆ ค่อยเริ่มรอบใหม่
+        dprint("[AutoPlaceEgg] สิ้นสุดรอบการทำงาน. รอ 30 วินาทีเพื่อเริ่มรอบใหม่...")
+        if not _waitAlive(tok, 30) then break end
     end
 end
+--=============================================================================
+
 
 --==============================================================
 --                    OTHER RUNNERS
@@ -1129,35 +1116,49 @@ local function runAutoCollectPet(tok)
         if want == "Any" then return true end
         return petArea(uid) == want
     end
+
     while tok.alive do
         local CollectType = Configuration.Pet.CollectPet_Type or "All"
         local function claimDel(UID, PetData)
-            if PetData.RE then PetData.RE:FireServer("Claim") end
-            CharacterRE:FireServer("Del", UID)
+            if PetData.RE then pcall(function() PetData.RE:FireServer("Claim") end) end
+            pcall(function() CharacterRE:FireServer("Del", UID) end)
         end
+
         if CollectType == "All" then
             for UID, PetData in pairs(OwnedPets) do
                 if not tok.alive then break end
-                if PetData and not PetData.IsBig and passArea(UID) then claimDel(UID, PetData) end
+                if PetData and not PetData.IsBig and passArea(UID) then
+                    claimDel(UID, PetData)
+                    task.wait(0.2) -- << เพิ่มการหน่วงเวลา
+                end
             end
         elseif CollectType == "Match Pet" then
             for UID, PetData in pairs(OwnedPets) do
                 if not tok.alive then break end
                 if PetData and not PetData.IsBig and passArea(UID)
-                and Configuration.Pet.CollectPet_Pets[PetData.Type] then claimDel(UID, PetData) end
+                and Configuration.Pet.CollectPet_Pets[PetData.Type] then
+                    claimDel(UID, PetData)
+                    task.wait(0.2) -- << เพิ่มการหน่วงเวลา
+                end
             end
         elseif CollectType == "Match Mutation" then
             for UID, PetData in pairs(OwnedPets) do
                 if not tok.alive then break end
                 if PetData and not PetData.IsBig and passArea(UID)
-                and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then claimDel(UID, PetData) end
+                and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                    claimDel(UID, PetData)
+                    task.wait(0.2) -- << เพิ่มการหน่วงเวลา
+                end
             end
         elseif CollectType == "Match Pet&Mutation" then
             for UID, PetData in pairs(OwnedPets) do
                 if not tok.alive then break end
                 if PetData and not PetData.IsBig and passArea(UID)
                 and Configuration.Pet.CollectPet_Pets[PetData.Type]
-                and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then claimDel(UID, PetData) end
+                and Configuration.Pet.CollectPet_Mutations[PetData.Mutate] then
+                    claimDel(UID, PetData)
+                    task.wait(0.2) -- << เพิ่มการหน่วงเวลา
+                end
             end
         elseif CollectType == "Range" then
             local minV = tonumber(Configuration.Pet.CollectPet_Between.Min) or 0
@@ -1166,13 +1167,17 @@ local function runAutoCollectPet(tok)
                 if not tok.alive then break end
                 if PetData and not PetData.IsBig and passArea(UID) then
                     local ps = tonumber(PetData.ProduceSpeed) or 0
-                    if ps >= minV and ps <= maxV then claimDel(UID, PetData) end
+                    if ps >= minV and ps <= maxV then
+                        claimDel(UID, PetData)
+                        task.wait(0.2) -- << เพิ่มการหน่วงเวลา
+                    end
                 end
             end
         end
         if not _waitAlive(tok, tonumber(Configuration.Pet.CollectPet_Delay) or 5) then break end
     end
 end
+
 
 local function runAutoHatch(tok)
     while tok.alive do
@@ -1268,12 +1273,12 @@ local Window = Fluent:CreateWindow({
 local Home = Window:AddTab({ Title = "Home", Icon = "home" })
 local Tabs = {
     Main = Window:AddTab({ Title = "Main Features", Icon = "activity" }),
-    Pet = Window:AddTab({ Title = "Pet Features", Icon = "panda" }),
+    Pet = Window:AddTab({ Title = "Pet Features", Icon = "bone" }),
     Egg = Window:AddTab({ Title = "Egg Features", Icon = "egg" }),
     Shop = Window:AddTab({ Title = "Shop Features", Icon = "shopping-cart" }),
     Event = Window:AddTab({ Title = "Event Feature", Icon = "bookmark" }),
     Players = Window:AddTab({ Title = "Players Features", Icon = "user" }),
-    Sell = Window:AddTab({ Title = "Sell Features", Icon = "zap" }),
+    Sell = Window:AddTab({ Title = "Sell Features", Icon = "star" }),
     Inv = Window:AddTab({ Title = "Inventory", Icon = "inbox" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
     About = Window:AddTab({ Title = "About",Icon = "smile" }),
@@ -1578,15 +1583,14 @@ Tabs.Egg:AddToggle("Auto Egg",{ Title="Auto Buy Egg", Default=false, Callback=fu
     Configuration.Egg.AutoBuyEgg = v
     if v then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) else TaskMgr.stop("AutoBuyEgg") end
 end })
-Tabs.Egg:AddToggle("Auto Place Egg",{ Title="Auto Place Egg", Default=false, Callback=function(v)
-    Configuration.Egg.AutoPlaceEgg = v
-    if v then
-        Fluent:Notify({ Title = "Auto Place Egg", Content = "This feature is temporarily disabled (stub).", Duration = 4 })
-        TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg)
-    else
-        TaskMgr.stop("AutoPlaceEgg")
+Tabs.Egg:AddToggle("Auto Place Egg",{
+    Title="Auto Place Egg", Default=false,
+    Callback=function(v)
+        Configuration.Egg.AutoPlaceEgg = v
+        if v then TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg)
+        else TaskMgr.stop("AutoPlaceEgg") end
     end
-end })
+})
 Tabs.Egg:AddToggle("CheckMinCoin",{ Title = "Check Min Coin", Default = false, Callback = function(v) Configuration.Egg.CheckMinCoin = v end })
 
 Tabs.Egg:AddSection("Settings")
@@ -1958,7 +1962,7 @@ Tabs.Sell:AddDropdown("Sell Mode", { Title = "Sell Mode", Values = { "All_Unplac
 Tabs.Sell:AddDropdown("Sell Egg Types", { Title = "Egg Types (for Filter_Eggs)", Values = Eggs_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Types = v end })
 Tabs.Sell:AddDropdown("Sell Egg Mutations", { Title = "Egg Mutations (for Filter_Eggs)", Values = Mutations_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Mutations = v end })
 Tabs.Sell:AddInput("Pet Income Threshold", {
-    Title = "รายได้ต่อวิ (ขายสัตว์ที่ \"น้อยกว่า\" ค่านี้)",
+    Title = "ขายสัตว์ที่เงินต่อวิน้อยกว่าค่านี้",
     Default = tostring(Configuration.Sell.Pet_Income_Threshold or 0),
     Numeric = true, Finished = true,
     Callback = function(v) Configuration.Sell.Pet_Income_Threshold = tonumber(v) or 0 end
@@ -1984,7 +1988,7 @@ Tabs.Sell:AddButton({
                             if not OwnedPets[uid] then
                                 total = total + 1
                                 local ok = select(1, SellPet(uid))
-                                if ok then okCnt += 1 else failCnt += 1 end
+                                if ok then okCnt = okCnt + 1 else failCnt = failCnt + 1 end
                                 task.wait(0.15)
                             end
                         end
@@ -1993,7 +1997,7 @@ Tabs.Sell:AddButton({
                             if egg and not egg:FindFirstChild("DI") then
                                 total = total + 1
                                 local ok = select(1, SellEgg(egg.Name))
-                                if ok then okCnt += 1 else failCnt += 1 end
+                                if ok then okCnt = okCnt + 1 else failCnt = failCnt + 1 end
                                 task.wait(0.15)
                             end
                         end
@@ -2009,7 +2013,7 @@ Tabs.Sell:AddButton({
                                 if okT and okM then
                                     total = total + 1
                                     local ok = select(1, SellEgg(egg.Name))
-                                    if ok then okCnt += 1 else failCnt += 1 end
+                                    if ok then okCnt = okCnt + 1 else failCnt = failCnt + 1 end
                                     task.wait(0.15)
                                 end
                             end
@@ -2023,7 +2027,7 @@ Tabs.Sell:AddButton({
                                 if inc < th then
                                     total = total + 1
                                     local ok = select(1, SellPet(uid))
-                                    if ok then okCnt += 1 else failCnt += 1 end
+                                    if ok then okCnt = okCnt + 1 else failCnt = failCnt + 1 end
                                     task.wait(0.15)
                                 end
                             end
