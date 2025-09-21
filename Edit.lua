@@ -47,7 +47,10 @@ local Eggs_InGame       = require(InGameConfig:WaitForChild("ResEgg"))["__index"
 local Mutations_InGame  = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
 local PetFoods_InGame   = require(InGameConfig:WaitForChild("ResPetFood"))["__index"]
 local Pets_InGame       = require(InGameConfig:WaitForChild("ResPet"))["__index"]
-
+local conveyorConfig = {}
+local purchasedUpgrades = {}
+local shopParagraph -- ตัวแปรสำหรับเก็บ UI Paragraph ที่จะสร้างในภายหลัง
+local shopStatus = { upgradesDone = 0, lastAction = "Inactive" }
 --== Remotes
 local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
 local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
@@ -119,6 +122,117 @@ end
 --==============================================================
 --                      HELPERS
 --==============================================================
+-- ------------------[ ฟังก์ชัน Helpers ]------------------
+
+-- ฟังก์ชันสำหรับอัปเดตข้อความสถานะบน UI
+local function setShopStatus(msg)
+    shopStatus.lastAction = msg
+    if shopParagraph and shopParagraph.SetDesc then
+        shopParagraph:SetDesc(string.format("Upgrades: %d done\nLast: %s", shopStatus.upgradesDone, shopStatus.lastAction))
+    end
+end
+
+local function parseConveyorIndexFromId(idStr)
+    local n = tostring(idStr):match("(%d+)")
+    return n and tonumber(n) or nil
+end
+
+-- ฟังก์ชันสำหรับโหลดข้อมูลสายพาน
+local function loadConveyorConfig()
+   local ok, cfg = pcall(function()
+        local cfgFolder = ReplicatedStorage:WaitForChild("Config")
+        local module = cfgFolder:WaitForChild("ResConveyor")
+        return require(module)
+    end)
+    if ok and type(cfg) == "table" then
+        conveyorConfig = cfg
+    else
+        conveyorConfig = {}
+    end
+end
+
+-- ฟังก์ชันสำหรับอ่านค่าเงิน
+local function getPlayerCash()
+    return InventoryData and (InventoryData:GetAttribute("Coin") or 0) or 0
+end
+
+-- ฟังก์ชันสำหรับยิง RemoteEvent อัปเกรดสายพาน
+local function fireConveyorUpgrade(index)
+    local conveyorRE = ReplicatedStorage.Remote:WaitForChild("ConveyorRE")
+    local ok = pcall(function()
+        conveyorRE:FireServer("Upgrade", tonumber(index) or index)
+    end)
+    return ok
+end
+
+-- ฟังก์ชันสำหรับหาข้อมูลอัปเกรดตัวถัดไป
+local function findNextUpgradeData()
+    local conveyorFolder = Island:FindFirstChild("ENV") and Island.ENV:FindFirstChild("Conveyor")
+    local highestIndex = 0
+        for _, conveyor in ipairs(conveyorFolder:GetChildren()) do
+            local index = parseConveyorIndexFromId(conveyor.Name) -- << เรียกใช้ฟังก์ชันใหม่
+            if index and index > highestIndex then
+                highestIndex = index
+            end
+        end
+    dprint(("[AutoUpgrade-Debug] Highest conveyor owned: #%d"):format(highestIndex))
+
+    local nextIndex = highestIndex + 1
+    if highestIndex == 0 then nextIndex = 1 end
+    local nextConveyorName = "Conveyor" .. tostring(nextIndex)
+    dprint(("[AutoUpgrade-Debug] Next target: %s"):format(nextConveyorName))
+
+    if conveyorConfig and conveyorConfig[nextConveyorName] then
+        local upgradeData = conveyorConfig[nextConveyorName]
+        local cost = upgradeData.Cost
+        if type(cost) == "string" then
+                local clean = tostring(cost):gsub("[^%d%.]", "")
+                cost = tonumber(clean)
+            end
+        dprint(("[AutoUpgrade-Debug] Cost for next target: %d"):format(cost))
+        
+        local currentCash = getPlayerCash()
+        dprint(("[AutoUpgrade-Debug] Your current cash: %d"):format(currentCash))
+        
+        if currentCash >= cost then
+            dprint("[AutoUpgrade-Debug] Condition met: Cash >= Cost. Proceeding to buy.")
+            return { idx = nextIndex, cost = cost }
+        else
+            dprint("[AutoUpgrade-Debug] Condition FAILED: Cash < Cost. Waiting.")
+        end
+    else
+        dprint("[AutoUpgrade-Debug] Condition FAILED: Next target not found in config. (Maybe maxed out?)")
+    end
+
+    return nil
+end
+
+-- ฟังก์ชันสำหรับหา Tiles ที่ยังล็อคอยู่
+local function getLockedTiles()
+    local lockedTiles = {}
+    local locksFolder = Island:FindFirstChild("ENV") and Island.ENV:FindFirstChild("Locks")
+    if not locksFolder then return {} end
+
+    for _, lockModel in ipairs(locksFolder:GetChildren()) do
+        local farmPart = lockModel:FindFirstChild("Farm")
+        if farmPart and farmPart:IsA("BasePart") and farmPart.Transparency == 0 then
+            table.insert(lockedTiles, {
+                model = lockModel,
+                cost = farmPart:GetAttribute("LockCost") or math.huge
+            })
+        end
+    end
+    return lockedTiles
+end
+
+-- ฟังก์ชันสำหรับยิง RemoteEvent ปลดล็อค Tile
+local function fireUnlockTile(lockModel)
+    local ok = pcall(function()
+        CharacterRE:FireServer("Unlock", lockModel)
+    end)
+    return ok
+end
+-- =====================================================================================
 -- ==== Income Cache (drop-in) ====
 local IncomeCache = { map = {}, built = false, last = 0 }
 local function _buildIncomeIndex()
@@ -401,17 +515,27 @@ end
 local function pickFoodPerPet(uid, invAttrs)
     local per = Configuration.Pet.AutoFeed_PetFoods and Configuration.Pet.AutoFeed_PetFoods[uid]
     if type(per) ~= "table" then return nil end
-    local allow = {}
-    if rawget(per, 1) ~= nil then
-        for _, v in ipairs(per) do allow[tostring(v)] = true end
-    else
-        for k, on in pairs(per) do if on then allow[tostring(k)] = true end end
+
+    -- สร้างตารางของอาหารที่ "อนุญาต" ให้กิน
+    local allowedFoods = {}
+    for k, v in pairs(per) do
+        if v then table.insert(allowedFoods, tostring(k)) end
     end
-    for _, name in ipairs(PetFoods_InGame) do
+    
+    if #allowedFoods == 0 then return nil end
+
+    -- (แนะนำ) จัดเรียงอาหารที่อนุญาตตามตัวอักษรเพื่อให้ผลลัพธ์คงที่
+    table.sort(allowedFoods)
+
+    -- วนลูปเฉพาะอาหารที่ได้รับอนุญาตเท่านั้น
+    for _, name in ipairs(allowedFoods) do
         local have = tonumber(invAttrs[name] or 0) or 0
-        if allow[name] and have > 0 then return name end
+        if have > 0 then
+            return name -- คืนค่าอาหารชนิดแรกที่เจอว่ามีของในกระเป๋า
+        end
     end
-    return nil
+
+    return nil -- ถ้าอาหารที่เลือกไว้หมดทุกอย่าง
 end
 
 --==============================================================
@@ -538,7 +662,7 @@ end
 --                      CONFIG / UI
 --==============================================================
 Configuration = {
-    Main = { AutoCollect=false, Collect_Delay=3, Collect_Type="Delay", Collect_Between={Min=100000,Max=1000000}, },
+    Main = { AutoCollect=false, Collect_Delay=3, Collect_Type="Delay",AutoUpgradeConveyor = false,AutoUnlockTiles = false },
     Pet  = {
         AutoFeed=false, AutoFeed_Foods={}, AutoPlacePet=false, AutoFeed_Delay=10, AutoFeed_Type="",AutoFeed_Pets = {}, AutoFeed_PetFoods = {}, 
         AutoFeed_UsePerPet = true,
@@ -1152,6 +1276,64 @@ end
 --==============================================================
 --                    OTHER RUNNERS
 --==============================================================
+-- ================== Task Runners สำหรับ Auto Upgrade & Unlock ==================
+local function runAutoUpgradeConveyor(tok)
+    shopStatus = { upgradesDone = 0, lastAction = "Starting..." }
+    setShopStatus("Ready to upgrade!", shopStatus)
+    loadConveyorConfig()
+
+    while tok.alive do
+        if not next(conveyorConfig) then
+            setShopStatus("Waiting for config...")
+            if not _waitAlive(tok, 2) then break end
+        else
+            local nextUpgrade = findNextUpgradeData()
+            if nextUpgrade then
+                setShopStatus(string.format("Upgrading to Conveyor #%d...", nextUpgrade.idx), shopStatus)
+                if fireConveyorUpgrade(nextUpgrade.idx) then
+                    task.wait(2) -- รอให้โมเดลใหม่ปรากฏใน workspace
+                    shopStatus.upgradesDone = shopStatus.upgradesDone + 1
+                end
+                task.wait(0.5)
+            else
+                setShopStatus("Waiting for money for next conveyor...", shopStatus)
+                if not _waitAlive(tok, 2) then break end
+            end
+        end
+    end
+    setShopStatus("Stopped.", shopStatus)
+end
+
+local function runAutoUnlockTiles(tok)
+    while tok.alive do
+        local lockedTiles = getLockedTiles()
+        local cash = getPlayerCash()
+        local unlockedSomething = false
+
+        if #lockedTiles > 0 then
+            -- เรียงลำดับอันที่ถูกที่สุดก่อน
+            table.sort(lockedTiles, function(a, b) return a.cost < b.cost end)
+            
+            for _, tileInfo in ipairs(lockedTiles) do
+                if cash >= tileInfo.cost then
+                    setShopStatus(string.format("Unlocking %s...", tileInfo.model.Name))
+                    if fireUnlockTile(tileInfo.model) then
+                        unlockedSomething = true
+                        cash = cash - tileInfo.cost -- อัปเดตเงินจำลองเพื่อซื้ออันต่อไปได้ทันที
+                        task.wait(1) -- รอหลังปลดล็อค
+                    end
+                end
+            end
+        end
+        
+        if not unlockedSomething then
+            setShopStatus("Waiting for money for next tile...", shopStatus)
+            if not _waitAlive(tok, 2) then break end
+        end
+    end
+    setShopStatus("Stopped.", shopStatus)
+end
+-- ========================================================================================
 local function runAntiAFK(tok)
     local VirtualUser = game:GetService("VirtualUser")
     while tok.alive do
@@ -1443,6 +1625,31 @@ Tabs.Main:AddToggle("AutoCollect",{ Title="Auto Collect", Default=false, Callbac
     Configuration.Main.AutoCollect = v
     if v then TaskMgr.start("AutoCollect", runAutoCollect) else TaskMgr.stop("AutoCollect") end
 end })
+-- สร้าง Paragraph สำหรับแสดงสถานะ
+shopParagraph = Tabs.Main:AddParagraph({
+    Title = "Conveyor Status",
+    Content = "Upgrades: 0 done\nLast: Inactive"
+})
+
+-- สร้างปุ่ม Toggle
+Tabs.Main:AddToggle("AutoUpgradeConveyor",{ 
+    Title="Auto Upgrade Conveyor", 
+    Default=false, 
+    Callback=function(v)
+        Configuration.Main.AutoUpgradeConveyor = v
+        if v then TaskMgr.start("AutoUpgradeConveyor", runAutoUpgradeConveyor)
+        else TaskMgr.stop("AutoUpgradeConveyor") end
+    end 
+})
+Tabs.Main:AddToggle("AutoUnlockTiles",{ 
+    Title="Auto Unlock Tiles", 
+    Default=false, 
+    Callback=function(v)
+        Configuration.Main.AutoUnlockTiles = v
+        if v then TaskMgr.start("AutoUnlockTiles", runAutoUnlockTiles)
+        else TaskMgr.stop("AutoUnlockTiles") end
+    end 
+})
 Tabs.Main:AddSection("Settings")
 Tabs.Main:AddSlider("AutoCollect Delay",{ Title = "Collect Delay", Default = 3, Min = 3, Max = 180, Rounding = 0, Callback = function(v) Configuration.Main.Collect_Delay = v end })
 
