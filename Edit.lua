@@ -294,16 +294,21 @@ local function _rebuildMyPetsList()
 end
 
 local function _addMyPet(m)
-    if _isOwnedPetModel(m) then
+    if _isOwnedPetModel(m) and not MyPets[m] then
         MyPets[m] = true
-        _rebuildMyPetsList()
+        table.insert(MyPets_List, m) -- เพิ่มเข้าไปในลิสต์โดยตรง
     end
 end
 
 local function _removeMyPet(m)
     if MyPets[m] then
-        MyPets[m] = nil
-        _rebuildMyPetsList()
+        MyPets[m] = nil -- ลบออกจาก Dictionary
+
+        -- ค้นหาและลบออกจากลิสต์โดยตรง
+        local index = table.find(MyPets_List, m)
+        if index then
+            table.remove(MyPets_List, index)
+        end
     end
 end
 
