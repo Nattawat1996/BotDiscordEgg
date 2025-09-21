@@ -1666,7 +1666,7 @@ end
 table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(onBigPetListChanged))
 table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(onBigPetListChanged))
 -- =====================================================================================
-
+task.defer(updateBigPetUIDDropdowns)
 local FeedTargetsDD = Tabs.Pet:AddDropdown("Pet Feed_Targets", {
     Title = "Select Big Pets to Feed",
     Description = "เลือกเฉพาะ Big Pets ที่จะให้อาหาร (เว้นว่าง = ให้อาหาร Big ทุกตัว)",
@@ -2350,7 +2350,7 @@ Home:AddButton({
     Options["Hide Effects"]:SetValue(true)
     Options["Disable3DOnly"]:SetValue(true)
     Options["FPS_Lock"]:SetValue(true)
-    Options["FPS_Value"]:SetValue(30)
+    Options["FPS_Value"]:SetValue(5)
     Fluent:Notify({ Title = "Preset", Content = "เปิด Safe Mode เรียบร้อย", Duration = 4 })
   end
 })
