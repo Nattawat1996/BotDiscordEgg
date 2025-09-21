@@ -802,6 +802,7 @@ local function Grid_Dist2(a, b)
 end
 
 -- สร้างชุด “ช่องที่ถูกยึด” จากสัตว์ (และไข่ที่ถูกวาง)
+-- ================== แก้ไข Grid_OccupiedKeys (เพิ่มการตรวจสอบจาก Workspace) ==================
 local function Grid_OccupiedKeys()
     local keys = {}
 
@@ -828,8 +829,18 @@ local function Grid_OccupiedKeys()
         end
     end
 
+    --[[ ส่วนที่เพิ่มเข้ามา: ตรวจสอบไข่ที่ถูกวางแล้วจาก workspace โดยตรง ]]
+    for _, model in ipairs(BlockFolder:GetChildren()) do
+        -- เช็คให้แน่ใจว่าเป็นไข่ของเรา
+        if OwnedEggData:FindFirstChild(model.Name) then
+            local pos = model:GetPivot().Position
+            keys[Grid_keyXZ(pos.X, pos.Z)] = true
+        end
+    end
+
     return keys
 end
+-- =====================================================================================
 
 -- รายการช่องว่างตามพื้นที่ (Any/Land/Water)
 local function Grid_FreeList(area)
