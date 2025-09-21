@@ -40,7 +40,6 @@ local InventoryData = Data:WaitForChild("Asset",30)
 
 local EnvirontmentConnections = {}
 local Players_InGame = {}
-local playerUpdateThread = nil 
 local bigPetUpdateThread = nil 
 --== Game Res tables
 local Eggs_InGame       = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
@@ -2257,26 +2256,7 @@ Tabs.Players:AddDropdown("Gift Egg Types", { Title = "Egg Types to Gift (Match_E
 Tabs.Players:AddDropdown("Gift Egg Mutations", { Title = "Egg Mutations to Gift (Match_Eggs)", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Egg_Mutations = v end })
 Tabs.Players:AddDropdown("Pet Type",{ Title = "Select Pet Type", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Type = v end })
 Tabs.Players:AddDropdown("Pet Mutations",{ Title = "Select Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Players.Pet_Mutations = v end })
--- ================== แก้ไขการอัปเดตรายชื่อผู้เล่น (ใช้ Debounce) ==================
-table.insert(EnvirontmentConnections, Players_List_Updated.Event:Connect(function(newList)
-    -- ถ้ามี thread อัปเดตเก่าที่กำลังรออยู่ ให้ยกเลิกไปก่อน
-    if playerUpdateThread then
-        task.cancel(playerUpdateThread)
-        playerUpdateThread = nil
-    end
-
-    -- สร้าง thread อัปเดตใหม่ โดยให้หน่วงเวลา 1 วินาที
-    playerUpdateThread = task.delay(1, function()
-        if Players_Dropdown and Players_Dropdown.Instance then
-            pcall(function()
-                Players_Dropdown:SetValues(newList)
-                dprint("[UI] อัปเดตรายชื่อผู้เล่นแล้ว")
-            end)
-            playerUpdateThread = nil
-        end
-    end)
-end))
--- ==============================================================================
+table.insert(EnvirontmentConnections,Players_List_Updated.Event:Connect(function(newList) Players_Dropdown:SetValues(newList) end))
 
 --============================== Inventory =============================
 local MUTA_EMOJI = setmetatable({
