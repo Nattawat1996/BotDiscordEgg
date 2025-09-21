@@ -50,11 +50,13 @@ local Pets_InGame       = require(InGameConfig:WaitForChild("ResPet"))["__index"
 local conveyorConfig = {}
 local purchasedUpgrades = {}
 local shopParagraph -- ตัวแปรสำหรับเก็บ UI Paragraph ที่จะสร้างในภายหลัง
+local bigPetSlot1_Label, bigPetSlot2_Label, bigPetSlot3_Label
 local shopStatus = { upgradesDone = 0, lastAction = "Inactive" }
 --== Remotes
 local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
 local CharacterRE  = GameRemoteEvents:WaitForChild("CharacterRE", 30)
 local OwnedPets = {}
+local bigPetSlotMap = {}
 local MyBigPets = {}
 local Egg_Belt = {}
 local Configuration
@@ -123,6 +125,76 @@ end
 --                      HELPERS
 --==============================================================
 -- ------------------[ ฟังก์ชัน Helpers ]------------------
+
+-- ================== เพิ่มฟังก์ชัน updateBigPetSlots ==================
+local function updateBigPetSlots()
+    -- รีเซ็ตข้อมูลเก่า
+    bigPetSlotMap = {}
+    local bigPetsInWorld = {}
+    for uid, petData in pairs(MyBigPets) do
+        table.insert(bigPetsInWorld, petData)
+    end
+    
+    -- เรียงลำดับเพื่อให้ Slot คงที่เสมอ (เช่น เรียงตามชื่อ UID)
+    table.sort(bigPetsInWorld, function(a, b) return a.UID < b.UID end)
+    
+    -- สร้าง UI Labels และ Dropdowns Array เพื่อให้ง่ายต่อการวนลูป
+    local slotLabels = {bigPetSlot1_Label, bigPetSlot2_Label, bigPetSlot3_Label}
+    local slotDropdowns = {Options["BigPetSlot1_Foods"], Options["BigPetSlot2_Foods"], Options["BigPetSlot3_Foods"]}
+
+    -- วนลูปเพื่อกำหนด Slot และอัปเดต UI
+    for i = 1, 3 do
+        local petData = bigPetsInWorld[i]
+        if petData then
+            -- กำหนด Slot ให้กับ Pet
+            bigPetSlotMap[petData.UID] = i
+            
+            -- อัปเดต Label บน UI
+            slotLabels[i]:SetDesc(string.format("Detected: [%s|%s]", petData.Type, petData.Mutate or "None"))
+            
+            -- โหลดการตั้งค่าอาหารของ Slot นี้มาแสดงบน Dropdown
+            local savedFoods = Configuration.Pet.BigPetSlots[i] or {}
+            pcall(function() slotDropdowns[i]:SetValue(savedFoods) end)
+        else
+            -- ไม่มี Pet ใน Slot นี้
+            slotLabels[i]:SetDesc("No Big Pet Detected")
+        end
+    end
+end
+-- =================================================================
+-- ================== แก้ไขการเชื่อมต่อ Event ของ Big Pet (สลับลำดับฟังก์ชัน) ==================
+
+-- 1. สร้างฟังก์ชันสำหรับ Debounce และอัปเดต UI ก่อน
+local function onBigPetListChanged()
+    if bigPetUpdateThread then
+        task.cancel(bigPetUpdateThread)
+        bigPetUpdateThread = nil
+    end
+    bigPetUpdateThread = task.delay(1, function()
+        pcall(updateBigPetSlots)
+        dprint("[UI] อัปเดตรายชื่อ Big Pet และ Slots แล้ว")
+        bigPetUpdateThread = nil
+    end)
+end
+
+-- 2. สร้างฟังก์ชันตัวกลางสำหรับกรอง Event ทีหลัง
+local function handlePossibleBigPetChange(petModel)
+    -- ตรวจสอบว่าเป็นสัตว์เลี้ยงของเราหรือไม่
+    if not _isOwnedPetModel(petModel) then return end
+    
+    -- ตรวจสอบว่าเป็น Big Pet หรือไม่
+    local root = petModel.PrimaryPart or petModel:FindFirstChild("RootPart")
+    if root and root:GetAttribute("BigValue") ~= nil then
+        -- ถ้าใช่ทั้งหมด ค่อยเรียกใช้ onBigPetListChanged ที่รู้จักแล้ว
+        onBigPetListChanged()
+    end
+end
+
+-- 3. เชื่อมต่อ Event เป็นลำดับสุดท้าย
+table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(handlePossibleBigPetChange))
+table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(handlePossibleBigPetChange))
+
+-- =====================================================================================
 
 -- ฟังก์ชันสำหรับอัปเดตข้อความสถานะบน UI
 local function setShopStatus(msg)
@@ -512,30 +584,25 @@ local function _cloneFoodMap(t)
     return m
 end
 
-local function pickFoodPerPet(uid, invAttrs)
-    local per = Configuration.Pet.AutoFeed_PetFoods and Configuration.Pet.AutoFeed_PetFoods[uid]
-    if type(per) ~= "table" then return nil end
+local function pickFoodPerPet(slotNumber, invAttrs)
+    -- อ่านค่าอาหารที่ตั้งไว้สำหรับ Slot นั้นๆ
+    local allowedFoodsConfig = Configuration.Pet.BigPetSlots[slotNumber]
+    if not allowedFoodsConfig or not next(allowedFoodsConfig) then return nil end
 
-    -- สร้างตารางของอาหารที่ "อนุญาต" ให้กิน
+    -- สร้างลิสต์อาหารที่อนุญาต
     local allowedFoods = {}
-    for k, v in pairs(per) do
-        if v then table.insert(allowedFoods, tostring(k)) end
+    for food, isAllowed in pairs(allowedFoodsConfig) do
+        if isAllowed then table.insert(allowedFoods, food) end
     end
-    
-    if #allowedFoods == 0 then return nil end
-
-    -- (แนะนำ) จัดเรียงอาหารที่อนุญาตตามตัวอักษรเพื่อให้ผลลัพธ์คงที่
     table.sort(allowedFoods)
 
-    -- วนลูปเฉพาะอาหารที่ได้รับอนุญาตเท่านั้น
+    -- วนลูปหาอาหารที่มีในกระเป๋า
     for _, name in ipairs(allowedFoods) do
-        local have = tonumber(invAttrs[name] or 0) or 0
-        if have > 0 then
-            return name -- คืนค่าอาหารชนิดแรกที่เจอว่ามีของในกระเป๋า
+        if (tonumber(invAttrs[name]) or 0) > 0 then
+            return name
         end
     end
-
-    return nil -- ถ้าอาหารที่เลือกไว้หมดทุกอย่าง
+    return nil
 end
 
 --==============================================================
@@ -664,8 +731,11 @@ end
 Configuration = {
     Main = { AutoCollect=false, Collect_Delay=3, Collect_Type="Delay",AutoUpgradeConveyor = false,AutoUnlockTiles = false },
     Pet  = {
-        AutoFeed=false, AutoFeed_Foods={}, AutoPlacePet=false, AutoFeed_Delay=10, AutoFeed_Type="",AutoFeed_Pets = {}, AutoFeed_PetFoods = {}, 
-        AutoFeed_UsePerPet = true,
+        BigPetSlots = {
+        [1] = {}, -- การตั้งค่าอาหารสำหรับ Slot 1
+        [2] = {}, -- การตั้งค่าอาหารสำหรับ Slot 2
+        [3] = {}  -- การตั้งค่าอาหารสำหรับ Slot 3
+    },AutoFeed=false, AutoFeed_Foods={}, AutoPlacePet=false, AutoFeed_Delay=10, AutoFeed_Type="",AutoFeed_Pets = {}, AutoFeed_PetFoods = {}, 
         CollectPet_Type="All", CollectPet_Auto=false, CollectPet_Mutations={}, CollectPet_Pets={},
         CollectPet_Delay=5, CollectPet_Between={Min=100000,Max=1000000}, CollectPet_Area="Any",
         PlacePet_Mode="All", PlacePet_Types={}, PlacePet_Mutations={}, AutoPlacePet_Delay=1.0,
@@ -696,7 +766,6 @@ Configuration = {
 }
 Configuration.Pet.AutoFeed_Pets      = Configuration.Pet.AutoFeed_Pets      or {}
 Configuration.Pet.AutoFeed_PetFoods  = Configuration.Pet.AutoFeed_PetFoods  or {}
-Configuration.Pet.AutoFeed_UsePerPet = (Configuration.Pet.AutoFeed_UsePerPet ~= false)
 
 --== Event data
 local EventTaskData; local ResEvent; local EventName="None";
@@ -1424,18 +1493,23 @@ local function runAutoFeed(tok)
         if not InventoryData then InventoryData = Data:FindFirstChild("Asset") end
         local Data_Inventory = (InventoryData and InventoryData:GetAttributes()) or {}
 
+        -- วนลูปจากลิสต์ Big Pet ที่เรามี
         for uid, petModel in pairs(MyBigPets) do
             if not tok.alive then break end
-
-            local petCfg = Data_OwnedPets:FindFirstChild(uid)
-            -- ตรวจสอบว่ายังไม่ได้ให้อาหาร (ไม่จำเป็นต้องเช็ค isBig อีกแล้ว)
-            if petCfg and (not petCfg:GetAttribute("Feed")) then
-                local Food = pickFoodPerPet(uid, Data_Inventory)
-                if Food and Food ~= "" then
-                    CharacterRE:FireServer("Focus", Food) task.wait(0.3)
-                    PetRE:FireServer("Feed", uid) task.wait(0.3)
-                    CharacterRE:FireServer("Focus")
-                    Data_Inventory[Food] = math.max(0, (tonumber(Data_Inventory[Food] or 0) or 0) - 1)
+            
+            -- หาว่า Pet ตัวนี้อยู่ Slot ไหน
+            local slot = bigPetSlotMap[uid]
+            if slot then
+                local petCfg = Data_OwnedPets:FindFirstChild(uid)
+                if petCfg and (not petCfg:GetAttribute("Feed")) then
+                    -- ส่ง Slot Number และข้อมูลกระเป๋าไปให้ฟังก์ชันเลือกอาหาร
+                    local Food = pickFoodPerPet(slot, Data_Inventory)
+                    if Food and Food ~= "" then
+                        CharacterRE:FireServer("Focus", Food) task.wait(0.3)
+                        PetRE:FireServer("Feed", uid) task.wait(0.3)
+                        CharacterRE:FireServer("Focus")
+                        Data_Inventory[Food] = math.max(0, (tonumber(Data_Inventory[Food] or 0) or 0) - 1)
+                    end
                 end
             end
         end
@@ -1766,138 +1840,46 @@ Tabs.Pet:AddButton({
         })
     end
 })
-
-Tabs.Pet:AddSection("Settings")
-Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 10, Min = 10, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
-Tabs.Pet:AddSlider("AutoCollectPet Delay",{ Title = "Auto Collect Pet Delay", Default = 5, Min = 5, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.CollectPet_Delay = v end })
-
-local BigPetUIDLabels = {}
-local function labelForBigPet(uid, P)
-    return string.format("[%s|%s] %s",
-        tostring(P and P.Type or "?"),
-        tostring(P and P.Mutate or "None"),
-        tostring(uid))
-end
-local function labelToUID(v)
-    if type(v) ~= "string" then return v end
-    if BigPetUIDLabels and BigPetUIDLabels[v] then
-        return BigPetUIDLabels[v]
-    end
-    local uid = v:match("%]%s+(.+)$")
-    return uid or v
-end
-
-PickPetForFoodDD = Tabs.Pet:AddDropdown("PickPet ForFood", {
-    Title = "Pick Big Pet",
-    Values = {}, Multi = false, Default = "",
-    Callback = function(label)
-        Configuration.Pet._PickPetForFood = labelToUID(label or "")
-    end
-})
-
-local function _cloneFoodMap_ext(t) return _cloneFoodMap(t) end
-
-local PickFoodsForPetDD = Tabs.Pet:AddDropdown("PickFoods ForOnePet", {
-    Title = "Select Food",
-    Description = "เลือกชนิดอาหารที่จะอนุญาตให้สัตว์ตัวนี้กิน",
+Tabs.Pet:AddSection("Auto feed Pet Settings")
+-- --- Slot 1 ---
+bigPetSlot1_Label = Tabs.Pet:AddParagraph({ Title = "Slot 1:", Content = "No Big Pet Detected" })
+Tabs.Pet:AddDropdown("BigPetSlot1_Foods", {
+    Title = "Food for Slot 1",
     Values = PetFoods_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Pet._PickFoodsDraft = v end
-})
-Tabs.Pet:AddButton({
-    Title = "Save foods to this pet",
-    Description = "บันทึกชุดอาหารให้กับ Big Pet ที่เลือก",
-    Callback = function()
-        local uid   = Configuration.Pet._PickPetForFood
-        local draft = Configuration.Pet._PickFoodsDraft
-        if not uid or uid == "" then
-            Fluent:Notify({ Title="Per-Pet Food", Content="กรุณาเลือก Big Pet ก่อน", Duration=4 })
-            return
-        end
-        if type(draft) ~= "table" or next(draft) == nil then
-            Fluent:Notify({ Title="Per-Pet Food", Content="ยังไม่ได้เลือกชนิดอาหาร", Duration=4 })
-            return
-        end
-        Configuration.Pet.AutoFeed_PetFoods[uid] = _cloneFoodMap(draft)
-        Configuration.Pet._PickFoodsDraft = {}
-        Fluent:Notify({ Title="Per-Pet Food", Content=("บันทึกอาหารให้ UID: %s แล้ว"):format(uid), Duration=4 })
-    end
-})
-Tabs.Pet:AddButton({
-    Title = "Clear foods for this pet",
-    Description = "ล้างรายการอาหารของ Big Pet ตัวที่เลือก",
-    Callback = function()
-        local uid = Configuration.Pet._PickPetForFood
-        if uid and Configuration.Pet.AutoFeed_PetFoods[uid] then
-            Configuration.Pet.AutoFeed_PetFoods[uid] = nil
-            Fluent:Notify({ Title="Per-Pet Food", Content=("ล้างรายการของ UID: %s แล้ว"):format(uid), Duration=4 })
-        end
-    end
-})
-Tabs.Pet:AddToggle("Use Per-Pet Foods", {
-    Title = "Use per-pet foods first",
-    Default = true,
-    Callback = function(v) Configuration.Pet.AutoFeed_UsePerPet = v end
-})
-
-local function updateBigPetUIDDropdowns()
-    local labels = {}
-    BigPetUIDLabels = {}
-    for uid, P in pairs(OwnedPets) do
-        if P and P.IsBig then
-            local label = labelForBigPet(uid, P)
-            BigPetUIDLabels[label] = uid
-            table.insert(labels, label)
-        end
-    end
-    pcall(function() Options["Pet Feed_Targets"]:SetValues(labels) end)
-    if PickPetForFoodDD then
-        pcall(function() PickPetForFoodDD:SetValues(labels) end)
-    end
-end
--- ================== แก้ไขการอัปเดต Dropdown ของ Big Pet (ใช้ Debounce) ==================
-local function onBigPetListChanged()
-    -- ถ้ามี thread อัปเดตเก่าที่กำลังรออยู่ ให้ยกเลิกไปก่อน
-    if bigPetUpdateThread then
-        task.cancel(bigPetUpdateThread)
-        bigPetUpdateThread = nil
-    end
-
-    -- สร้าง thread อัปเดตใหม่ โดยให้หน่วงเวลา 1 วินาที
-    bigPetUpdateThread = task.delay(1, function()
-        pcall(updateBigPetUIDDropdowns)
-        dprint("[UI] อัปเดตรายชื่อ Big Pet แล้ว")
-        bigPetUpdateThread = nil
-    end)
-end
-
-table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(onBigPetListChanged))
-table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(onBigPetListChanged))
--- =====================================================================================
-task.defer(updateBigPetUIDDropdowns)
-local FeedTargetsDD = Tabs.Pet:AddDropdown("Pet Feed_Targets", {
-    Title = "Select Big Pets to Feed",
-    Description = "เลือกเฉพาะ Big Pets ที่จะให้อาหาร (เว้นว่าง = ให้อาหาร Big ทุกตัว)",
-    Values = {}, Multi = true, Default = {},
-    Callback = function(selected)
-        local uidSet = {}
-        if type(selected) == "table" then
-            for k, on in pairs(selected) do
-                if on then
-                    local uid = labelToUID(k)
-                    uidSet[uid] = true
-                end
-            end
-        elseif type(selected) == "string" and selected ~= "" then
-            uidSet[labelToUID(selected)] = true
-        end
-        Configuration.Pet.AutoFeed_Pets = uidSet
+    Callback = function(selection)
+        Configuration.Pet.BigPetSlots[1] = _cloneFoodMap(selection)
+        SaveManager:Save() -- บันทึกทันที
     end
 })
 
+-- --- Slot 2 ---
+bigPetSlot2_Label = Tabs.Pet:AddParagraph({ Title = "Slot 2:", Content = "No Big Pet Detected" })
+Tabs.Pet:AddDropdown("BigPetSlot2_Foods", {
+    Title = "Food for Slot 2",
+    Values = PetFoods_InGame, Multi = true, Default = {},
+    Callback = function(selection)
+        Configuration.Pet.BigPetSlots[2] = _cloneFoodMap(selection)
+        SaveManager:Save() -- บันทึกทันที
+    end
+})
+
+-- --- Slot 3 ---
+bigPetSlot3_Label = Tabs.Pet:AddParagraph({ Title = "Slot 3:", Content = "No Big Pet Detected" })
+Tabs.Pet:AddDropdown("BigPetSlot3_Foods", {
+    Title = "Food for Slot 3",
+    Values = PetFoods_InGame, Multi = true, Default = {},
+    Callback = function(selection)
+        Configuration.Pet.BigPetSlots[3] = _cloneFoodMap(selection)
+        SaveManager:Save() -- บันทึกทันที
+    end
+})
+Tabs.Pet:AddSlider("AutoFeed Delay",{ Title = "Feed Delay", Default = 10, Min = 10, Max = 30, Rounding = 0, Callback = function(v) Configuration.Pet.AutoFeed_Delay = v end })
+Tabs.Pet:AddSection("Collect Pets Settings")
 Tabs.Pet:AddDropdown("CollectPet Type",{ Title = "Collect Pet Type", Values = {"All","Match Pet","Match Mutation","Match Pet&Mutation","Range"}, Multi = false, Default = "All", Callback = function(v) Configuration.Pet.CollectPet_Type = v end })
 Tabs.Pet:AddDropdown("CollectPet Area",{ Title = "Collect Pet Area", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Pet.CollectPet_Area = v end })
 Tabs.Pet:AddDropdown("CollectPet Pets",{ Title = "Collect Pets", Values = Pets_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Pets = v end })
 Tabs.Pet:AddDropdown("CollectPet Mutations",{ Title = "Collect Mutations", Values = Mutations_InGame, Multi = true, Default = {}, Callback = function(v) Configuration.Pet.CollectPet_Mutations = v end })
+Tabs.Pet:AddSlider("AutoCollectPet Delay",{ Title = "Auto Collect Pet Delay", Default = 5, Min = 5, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.CollectPet_Delay = v end })
 Tabs.Pet:AddInput("CollectCash_Num1",{ Title = "Min Coin", Default = 100000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Min = tonumber(v) end })
 Tabs.Pet:AddInput("CollectCash_Num2",{ Title = "Max Coin", Default = 1000000, Numeric = true, Finished = false, Callback = function(v) Configuration.Pet.CollectPet_Between.Max = tonumber(v) end })
 
@@ -1917,17 +1899,17 @@ Tabs.Pet:AddDropdown("PlacePet Mode", {
     Callback = function(v) Configuration.Pet.PlacePet_Mode = v end
 })
 Tabs.Pet:AddDropdown("PlacePet Types", {
-    Title = "Place Types (Match)",
+    Title = "Place Types",Description = "Type For Mode Match",
     Values = Pets_InGame, Multi = true, Default = {},
     Callback = function(v) Configuration.Pet.PlacePet_Types = v end
 })
 Tabs.Pet:AddDropdown("PlacePet Mutations", {
-    Title = "Place Mutations (Match)",
+    Title = "Place Mutations",Description = "Muta For Mode Match",
     Values = Mutations_InGame, Multi = true, Default = {},
     Callback = function(v) Configuration.Pet.PlacePet_Mutations = v end
 })
 Tabs.Pet:AddSlider("AutoPlacePet Delay", {
-    Title = "Auto Place Pet Delay", Description = "ดีเลย์การพยายามวางสัตว์ในแต่ละครั้ง (วิ)",
+    Title = "Auto Place Pet Delay", Description = "Delay in each attempt to place an animal",
     Default = 1, Min = 0.1, Max = 5, Rounding = 1,
     Callback = function(v) Configuration.Pet.AutoPlacePet_Delay = v end
 })
@@ -2646,6 +2628,7 @@ Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Durat
 Perf_Set3DEnabled(not (Configuration.Perf.Disable3D == true))
 
 SaveManager:LoadAutoloadConfig()
+updateBigPetSlots()
 if Configuration.Perf.FPSLock or (getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.locked) then
     if getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.cap then
         Configuration.Perf.FPSValue = getgenv().MEOWY_FPS.cap
