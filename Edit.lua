@@ -2055,7 +2055,7 @@ end
 --                      UI
 --==============================================================
 local Window = Fluent:CreateWindow({
-    Title = GameName, SubTitle = "by DemiGodz", TabWidth = 220,
+    Title = GameName, SubTitle = "by DemiGodz", TabWidth = 160,
     Size = UDim2.fromOffset(522, 414), Acrylic = true, Theme = "Dark",
     MinimizeKey = Enum.KeyCode.LeftControl
 })
