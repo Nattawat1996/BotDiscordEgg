@@ -978,7 +978,8 @@ Configuration = {
     },
     Egg = {
         AutoHatch=false, Hatch_Delay=15, AutoBuyEgg=false, AutoBuyEgg_Delay=1,
-        AutoPlaceEgg=false, AutoPlaceEgg_Delay=1.0, Mutations={}, Types={},
+        AutoPlaceEgg=false, AutoPlaceEgg_Delay=1.0, BuyMutations={}, BuyTypes={},
+        PlaceTypes={},PlaceMutations={},
         CheckMinCoin=false, MinCoin=0, PlaceArea="Any", HatchArea="Any",
     },
     Shop = { Food = { AutoBuy=false, AutoBuy_Delay=10, Foods={} } },
@@ -1542,16 +1543,15 @@ local function runAutoPlaceEgg(tok)
     end
 
     local areaToPlace = Configuration.Egg.PlaceArea or "Any"
-    local eggsToPlace = {} 
-    dprint(("[AutoPlaceEgg] กรองไข่สำหรับพื้นที่: %s"):format(areaToPlace))
+    local eggsToPlace = {}
     for _, uid in ipairs(allUnplacedEggs) do
         local eggNode = OwnedEggData:FindFirstChild(uid)
         if eggNode then
             local eggTypeName = eggNode:GetAttribute("T") or "BasicEgg"
             local eggMutation = eggNode:GetAttribute("M") or "None"
             local habitatMatches = (areaToPlace == "Any") or (GetEggHabitat(eggTypeName) == areaToPlace)
-            local typePicked = (next(Configuration.Egg.Types) == nil) or (Configuration.Egg.Types[eggTypeName] == true)
-            local mutPicked  = (next(Configuration.Egg.Mutations) == nil) or (Configuration.Egg.Mutations[eggMutation] == true)
+            local typePicked = (next(Configuration.Egg.PlaceTypes) == nil) or (Configuration.Egg.PlaceTypes[eggTypeName] == true)
+            local mutPicked  = (next(Configuration.Egg.PlaceMutations) == nil) or (Configuration.Egg.PlaceMutations[eggMutation] == true)
             if habitatMatches and typePicked and mutPicked then
                 table.insert(eggsToPlace, uid)
             end
@@ -1977,25 +1977,55 @@ end
 
 local function runAutoBuyEgg(tok)
     local RE = GameRemoteEvents:WaitForChild("CharacterRE",30)
+
     local function currentCoin()
         local asset = InventoryData or Data:FindFirstChild("Asset")
         return asset and (tonumber(asset:GetAttribute("Coin") or 0) or 0) or 0
     end
+
     while tok.alive do
-        if (not Configuration.Egg.CheckMinCoin) or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0)) then
-            for _,egg in pairs(Egg_Belt) do
+        -- ต้องมีการเลือกอย่างน้อยหนึ่งอย่าง (Type หรือ Mutation) ไม่งั้น “ไม่ซื้อ”
+        local hasType = next(Configuration.Egg.BuyTypes) ~= nil
+        local hasMut  = next(Configuration.Egg.BuyMutations) ~= nil
+
+        if not hasType and not hasMut then
+            setShopStatus("AutoBuyEgg: waiting (no filters selected)")
+            if not _waitAlive(tok, (tonumber(Configuration.Egg.AutoBuyEgg_Delay) or 1)) then break end
+            -- ใช้ return แทนการใช้ goto เพื่อข้ามไปยังลูปถัดไป
+            return
+        end
+
+        -- เงื่อนไขเงินขั้นต่ำ (ตามเดิม)
+        local passMoney = (not Configuration.Egg.CheckMinCoin) 
+                          or (currentCoin() >= (tonumber(Configuration.Egg.MinCoin) or 0))
+
+        if passMoney then
+            for _, egg in pairs(Egg_Belt) do
                 if not tok.alive then break end
-                local okType = Configuration.Egg.Types[egg.Type]
-                local okMut  = Configuration.Egg.Mutations[egg.Mutate]
+
+                -- ถ้ามีเลือก Type/Muta ค่อยกรองตามนั้น
+                local okType = (not hasType) or (Configuration.Egg.BuyTypes[egg.Type] == true)
+
+                -- ถ้าไม่เลือก Muta ให้ค่า Mutate เป็น None
+                local okMut = (not hasMut) or (Configuration.Egg.BuyMutations[egg.Mutate] == true)
+                if not hasMut then
+                    okMut = (egg.Mutate == "None")  -- กรณีไม่เลือก Mutation จะซื้อเฉพาะ "None"
+                end
+
                 if okType and okMut then
                     pcall(function() RE:FireServer("BuyEgg", egg.UID) end)
                     task.wait(0.15 + math.random() * 0.15)
                 end
             end
+        else
+            setShopStatus("AutoBuyEgg: waiting for money…")
         end
+
         if not _waitAlive(tok, (tonumber(Configuration.Egg.AutoBuyEgg_Delay) or 1) + math.random()*0.4) then break end
     end
 end
+
+
 
 local function runAutoBuyFood(tok)
     local FoodList = Data:WaitForChild("FoodStore",30):WaitForChild("LST",30)
@@ -2025,23 +2055,23 @@ end
 --                      UI
 --==============================================================
 local Window = Fluent:CreateWindow({
-    Title = GameName, SubTitle = "by DemiGodz", TabWidth = 160,
+    Title = GameName, SubTitle = "by DemiGodz", TabWidth = 220,
     Size = UDim2.fromOffset(522, 414), Acrylic = true, Theme = "Dark",
     MinimizeKey = Enum.KeyCode.LeftControl
 })
 -- วาง Home เป็นแท็บแรก (จะขึ้นบนสุด)
-local Home = Window:AddTab({ Title = "Home", Icon = "home" })
+local Home = Window:AddTab({ Title = "🏠 Home"})
 local Tabs = {
-    Main = Window:AddTab({ Title = "Main Features", Icon = "activity" }),
-    Pet = Window:AddTab({ Title = "Pet Features", Icon = "bone" }),
-    Egg = Window:AddTab({ Title = "Egg Features", Icon = "egg" }),
-    Shop = Window:AddTab({ Title = "Shop Features", Icon = "shopping-cart" }),
-    Event = Window:AddTab({ Title = "Event Feature", Icon = "bookmark" }),
-    Players = Window:AddTab({ Title = "Players Features", Icon = "user" }),
-    Sell = Window:AddTab({ Title = "Sell Features", Icon = "star" }),
-    Inv = Window:AddTab({ Title = "Inventory", Icon = "inbox" }),
-    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
-    About = Window:AddTab({ Title = "About",Icon = "smile" }),
+    Main = Window:AddTab({ Title = "⚡ Main Features"}),
+    Pet = Window:AddTab({ Title = "🐾  Pet Features"}),
+    Egg = Window:AddTab({ Title = "🥚 Egg Features"}),
+    Shop = Window:AddTab({ Title = "🛒 Shop Features"}),
+    Event = Window:AddTab({ Title = "🎟️ Event Feature"}),
+    Players = Window:AddTab({ Title = "🧑‍🤝‍🧑 Players Features"}),
+    Sell = Window:AddTab({ Title = "💸 Sell Features"}),
+    Inv = Window:AddTab({ Title = "📦 Inventory"}),
+    Settings = Window:AddTab({ Title = "⚙️ Settings"}),
+    About = Window:AddTab({ Title = "ℹ️ About"}),
 }
     Options = Fluent.Options
 
@@ -2116,7 +2146,7 @@ Tabs.Pet:AddToggle("SmartFeed",{ Title="Smart Feed (Unlock Only)", Default=false
     Configuration.Pet.SmartFeed = v
     if v then TaskMgr.start("SmartFeed", runSmartFeed) else TaskMgr.stop("SmartFeed") end
 end })
-Tabs.Pet:AddSlider("SmartFeed Delay",{ Title = "SmartFeed Delay", Default = 15, Min = 10, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.SmartFeed_Delay = v end })
+Tabs.Pet:AddSlider("SmartFeed Delay",{ Title = "SmartFeed Delay", Default = 15, Min = 15, Max = 300, Rounding = 0, Callback = function(v) Configuration.Pet.SmartFeed_Delay = v end })
 
 Tabs.Pet:AddToggle("Auto Collect Pet",{ Title="Auto Collect Pet", Default=false, Callback=function(v)
     Configuration.Pet.CollectPet_Auto = v
@@ -2323,28 +2353,47 @@ Tabs.Egg:AddToggle("Auto Place Egg",{
     end
 })
 Tabs.Egg:AddToggle("CheckMinCoin",{ Title = "Check Min Coin", Default = false, Callback = function(v) Configuration.Egg.CheckMinCoin = v end })
-
-Tabs.Egg:AddSection("Settings")
-Tabs.Egg:AddDropdown("Hatch Area",{ Title = "Hatch Area", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Egg.HatchArea = v end })
-Tabs.Egg:AddSlider("AutoHatch Delay",{ Title = "Hatch Delay", Default = 15, Min = 15, Max = 60, Rounding = 0, Callback = function(v) Configuration.Egg.Hatch_Delay = v end })
-Tabs.Egg:AddSlider("AutoBuyEgg Delay",{ Title = "Auto Buy Egg Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Egg.AutoBuyEgg_Delay = v end })
-Tabs.Egg:AddSlider("AutoPlaceEgg Delay",{ Title = "Auto Place Egg Delay", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Egg.AutoPlaceEgg_Delay = v end })
-Tabs.Egg:AddDropdown("PlaceEgg Area", { Title = "Place Area (Egg)", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Egg.PlaceArea = v end })
-Tabs.Egg:AddDropdown("Egg Type", {
-    Title = "Types",
-    Values = Eggs_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Egg.Types = v end
-})
-Tabs.Egg:AddDropdown("Egg Mutations", {
-    Title = "Mutations",
-    Values = Mutations_InGame, Multi = true, Default = {},
-    Callback = function(v) Configuration.Egg.Mutations = v end
-})
 Tabs.Egg:AddInput("Min Coin to Buy", {
     Title = "Min Coin", Default = tostring(Configuration.Egg.MinCoin or 0),
     Numeric = true, Finished = true,
     Callback = function(v) Configuration.Egg.MinCoin = tonumber(v) or 0 end
 })
+Tabs.Egg:AddSection("Buy Egg Filters")
+Tabs.Egg:AddDropdown("Buy Egg Types", {
+    Title = "Types (Buy)",
+    Values = Eggs_InGame,
+    Multi = true,
+    Default = {},
+    Callback = function(v) Configuration.Egg.BuyTypes = v end
+})
+Tabs.Egg:AddDropdown("Buy Egg Mutations", {
+    Title = "Mutations (Buy)",
+    Values = Mutations_InGame,
+    Multi = true,
+    Default = {},
+    Callback = function(v) Configuration.Egg.BuyMutations = v end
+})
+Tabs.Egg:AddSlider("AutoBuyEgg Delay",{ Title = "Auto Buy Egg Delay", Default = 1, Min = 0.1, Max = 3, Rounding = 1, Callback = function(v) Configuration.Egg.AutoBuyEgg_Delay = v end })
+Tabs.Egg:AddSection("Place Egg Filters")
+Tabs.Egg:AddDropdown("PlaceEgg Area", { Title = "Place Area (Egg)", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Egg.PlaceArea = v end })
+Tabs.Egg:AddDropdown("Place Egg Types", {
+    Title = "Types (Place)",
+    Values = Eggs_InGame,
+    Multi = true,
+    Default = {},
+    Callback = function(v) Configuration.Egg.PlaceTypes = v end
+})
+Tabs.Egg:AddDropdown("Place Egg Mutations", {
+    Title = "Mutations (Place)",
+    Values = Mutations_InGame,
+    Multi = true,
+    Default = {},
+    Callback = function(v) Configuration.Egg.PlaceMutations = v end
+})
+Tabs.Egg:AddSlider("AutoPlaceEgg Delay",{ Title = "Auto Place Egg Delay", Default = 1, Min = 0.1, Max = 5, Rounding = 1, Callback = function(v) Configuration.Egg.AutoPlaceEgg_Delay = v end })
+Tabs.Egg:AddSection("Hatch Filters")
+Tabs.Egg:AddDropdown("Hatch Area",{ Title = "Hatch Area", Values = {"Any","Land","Water"}, Multi = false, Default = "Any", Callback = function(v) Configuration.Egg.HatchArea = v end })
+Tabs.Egg:AddSlider("AutoHatch Delay",{ Title = "Hatch Delay", Default = 15, Min = 15, Max = 60, Rounding = 0, Callback = function(v) Configuration.Egg.Hatch_Delay = v end })
 
 --============================== Shop =============================
 Tabs.Shop:AddSection("Main")
@@ -2708,8 +2757,8 @@ task.defer(function() ResultPara:SetDesc(renderSummary()) end)
 --============================== Sell =============================
 Tabs.Sell:AddSection("Main")
 Tabs.Sell:AddDropdown("Sell Mode", { Title = "Sell Mode", Values = { "All_Unplaced_Pets", "All_Unplaced_Eggs", "Filter_Eggs", "Pets_Below_Income" }, Multi = false, Default = "", Callback = function(v) Configuration.Sell.Mode = v end })
-Tabs.Sell:AddDropdown("Sell Egg Types", { Title = "Egg Types (for Filter_Eggs)", Values = Eggs_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Types = v end })
-Tabs.Sell:AddDropdown("Sell Egg Mutations", { Title = "Egg Mutations (for Filter_Eggs)", Values = Mutations_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Mutations = v end })
+Tabs.Sell:AddDropdown("Sell Egg Types", { Title = "Egg Types", Values = Eggs_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Types = v end })
+Tabs.Sell:AddDropdown("Sell Egg Mutations", { Title = "Egg Mutations", Values = Mutations_InGame, Multi  = true, Default = {}, Callback = function(v) Configuration.Sell.Egg_Mutations = v end })
 Tabs.Sell:AddInput("Pet Income Threshold", {
     Title = "ขายสัตว์ที่เงินต่อวิน้อยกว่าค่านี้",
     Default = tostring(Configuration.Sell.Pet_Income_Threshold or 0),
