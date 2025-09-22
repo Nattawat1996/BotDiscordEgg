@@ -41,6 +41,7 @@ local InventoryData = Data:WaitForChild("Asset",30)
 local EnvirontmentConnections = {}
 local Players_InGame = {}
 local bigPetUpdateThread = nil 
+local lastKnownBigPetUIDs = {}
 --== Game Res tables
 local Eggs_InGame       = require(InGameConfig:WaitForChild("ResEgg"))["__index"]
 local Mutations_InGame  = require(InGameConfig:WaitForChild("ResMutate"))["__index"]
@@ -50,6 +51,8 @@ local conveyorConfig = {}
 local purchasedUpgrades = {}
 local shopParagraph -- ตัวแปรสำหรับเก็บ UI Paragraph ที่จะสร้างในภายหลัง
 local bigPetSlot1_Label, bigPetSlot2_Label, bigPetSlot3_Label
+local petPlaceParagraph
+local eggPlaceParagraph
 local shopStatus = { upgradesDone = 0, lastAction = "Inactive" }
 --== Remotes
 local PetRE        = GameRemoteEvents:WaitForChild("PetRE", 30)
@@ -60,6 +63,8 @@ local MyBigPets = {}
 local Egg_Belt = {}
 local Configuration
 local Options
+local MyPets = {}
+local MyPets_List = {}
 -- ==== DEBUG flags ====
 local G = getgenv()
 G.MEOWY_DBG = G.MEOWY_DBG or { on = true, toast = false }
@@ -121,81 +126,155 @@ local function _areaFromXZ(x, z)
 end
 
 --==============================================================
+--                      SmartFeedpet
+--==============================================================
+
+local SmartFeedConfig = {
+    -- หมวดปลดล็อก Mutation (สามารถปลดจาก Slot ไหนก็ได้)
+    { Fruit = "Pear",         UnlockType = "MUTATION", UnlockTarget = "Golden" },
+    { Fruit = "PineApple",    UnlockType = "MUTATION", UnlockTarget = "Diamond" },
+    { Fruit = "DragonFruit", UnlockType = "MUTATION", UnlockTarget = "Electirc" },
+    { Fruit = "GoldMango",   UnlockType = "MUTATION", UnlockTarget = "Fire" },
+    { Fruit = "VoltGinkgo",  UnlockType = "MUTATION", UnlockTarget = "Dino" },
+    { Fruit = "Durian",       UnlockType = "MUTATION", UnlockTarget = "Snow" },
+    
+    -- หมวดปลดล็อกสัตว์ (Pet) - กำหนดโดยตรงว่าปลดล็อกใน Slot ไหน
+    -- **สำคัญ:** กรุณาตรวจสอบและแก้ไข "ชื่อสัตว์เป้าหมาย" ให้ถูกต้อง
+    { Fruit = "BloodstoneCycad",   UnlockType = "PET", UnlockTarget = {"Ankylosaurus","Velociraptor","Stegosaurus","Triceratops","Pachycephalosaur","Pterosaur"},Slots = {1, 2} },
+    { Fruit = "ColossalPinecone",  UnlockType = "PET", UnlockTarget = {"Tyrannosaurus","Brontosaurus","Plesiosaur"},Slots = {1, 2} },
+    { Fruit = "DeepseaPearlFruit",UnlockType = "PET", UnlockTarget = {"Manta","Shark","Anglerfish"},Slots = {3} },
+}
+
+
+-- ฟังก์ชันตรวจสอบ Muta ที่ปลดล็อกแล้ว
+local function isMutationUnlocked(mutationName)
+    local playerGui = Player:WaitForChild("PlayerGui", 5)
+    local screenGui = playerGui and playerGui:WaitForChild("ScreenBigPetSwitch", 5)
+    local rootFrame = screenGui and screenGui:WaitForChild("Root", 5)
+    local mutsFrame = rootFrame and rootFrame:WaitForChild("Muts", 5)
+    if not mutsFrame then return false end
+    local mutationFrame = mutsFrame:FindFirstChild(mutationName)
+    local lockFrame = mutationFrame and mutationFrame:FindFirstChild("lock")
+    return lockFrame and not lockFrame.Visible
+end
+
+-- ฟังก์ชันตรวจสอบ Pet ที่ปลดล็อกแล้ว
+local function isBigPetUnlocked(petName)
+    local playerGui = Player:WaitForChild("PlayerGui", 5)
+    local screenGui = playerGui and playerGui:WaitForChild("ScreenBigPetSwitch", 5)
+    local rootFrame = screenGui and screenGui:WaitForChild("Root", 5)
+    local mainFrame = rootFrame and rootFrame:WaitForChild("Frame", 5)
+    local scrollingFrame = mainFrame and mainFrame:WaitForChild("ScrollingFrame", 5)
+    if not scrollingFrame then return false end
+    local BLACK_COLOR = Color3.new(0, 0, 0)
+    for _, petInstance in ipairs(scrollingFrame:GetChildren()) do
+        if petInstance.Name == petName then
+            local btn = petInstance:FindFirstChild("BTN")
+            local vpf = btn and btn:FindFirstChild("VPF")
+            if vpf and vpf.Ambient ~= BLACK_COLOR then return true end
+        end
+    end
+    return false
+end
+
+-- ฟังก์ชันหา Big Pet ของเรา (ตัวไหนก็ได้)
+function findAnyOfMyBigPets()
+    if MyBigPets and next(MyBigPets) then
+        for uid, _ in pairs(MyBigPets) do
+            return MyBigPets[uid].Model -- คืนค่า Model ของ Pet ตัวแรกที่เจอ
+        end
+    end
+    return nil  
+end
+
+-- ฟังก์ชันสั่งเปิด UI ตาม Slot
+function openBigPetUIForSlot(slotNumber)
+    local TIMEOUT = 5 
+
+    -- 1. ใช้ WaitForChild เพื่อรอแต่ละส่วนของ Path
+    local islandName = Player:GetAttribute("AssignedIslandName")
+    local islandModel = workspace.Art:WaitForChild(islandName, TIMEOUT)
+    if not islandModel then warn("หา Island Model ไม่เจอ: " .. islandName); return false end
+
+    local envFolder = islandModel:WaitForChild("ENV", TIMEOUT)
+    if not envFolder then warn("หาโฟลเดอร์ ENV ไม่เจอ"); return false end
+
+    local bigPetFolder = envFolder:WaitForChild("BigPet", TIMEOUT)
+    if not bigPetFolder then warn("หาโฟลเดอร์ BigPet ไม่เจอ"); return false end
+
+    local slotAnchor = bigPetFolder:WaitForChild(tostring(slotNumber), TIMEOUT)
+    if not slotAnchor then warn("หา Anchor ของ Slot " .. slotNumber .. " ไม่เจอ"); return false end
+
+    local activeModel = slotAnchor:WaitForChild("Active", TIMEOUT)
+    if not activeModel then warn("หา Model 'Active' ใน Slot " .. slotNumber .. " ไม่เจอ"); return false end
+
+    local switchModel = activeModel:WaitForChild("Switch", TIMEOUT)
+    
+    -- ▼▼▼ [ส่วนที่แก้ไข] ตรวจสอบว่าเป็น Model ก็พอ ▼▼▼
+    if not (switchModel and switchModel:IsA("Model")) then
+        warn("หาปุ่ม Switch ของ Slot " .. slotNumber .. " ไม่เจอ หรือไม่ใช่ Model!")
+        return false
+    end
+    
+    -- 2. วาร์ปตัวละคร
+    local character = Players.LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then warn("หา HumanoidRootPart ไม่เจอ!"); return false end
+    
+    dprint("กำลังวาร์ปไปที่ Switch ของ Slot " .. slotNumber .. " เพื่อเปิด UI...")
+    
+    -- ▼▼▼ [ส่วนที่แก้ไข] ดึง CFrame จาก GetPivot() แทน PrimaryPart ▼▼▼
+    local pivotCFrame = switchModel:GetPivot()
+    hrp.CFrame = pivotCFrame * CFrame.new(0, 15, 0)
+    task.wait(1)
+    
+    return true
+end
+
+
+-- ฟังก์ชันสำหรับป้อนอาหาร
+local function feedFruitToPet(fruitName, petUID)
+    if not petUID then dprint("[SmartFeed] ไม่เจอ Pet UID ที่จะป้อนอาหาร!") return false end
+    local petCfg = OwnedPetData:FindFirstChild(petUID)
+    if petCfg and (not petCfg:GetAttribute("Feed")) then
+        dprint(("[SmartFeed] กำลังป้อน '%s' ให้กับ Pet UID: %s"):format(fruitName, petUID))
+        CharacterRE:FireServer("Focus", fruitName) 
+        task.wait(0.3)
+        PetRE:FireServer("Feed", petUID) 
+        task.wait(0.3)
+        CharacterRE:FireServer("Focus")
+        return true
+    else
+        dprint("[SmartFeed] Pet ติด Cooldown, ข้ามการป้อนอาหาร")
+        return false
+    end
+end
+
+
+
+--==============================================================
 --                      HELPERS
 --==============================================================
 -- ------------------[ ฟังก์ชัน Helpers ]------------------
 
--- ================== เพิ่มฟังก์ชัน updateBigPetSlots ==================
-local function updateBigPetSlots()
-    -- รีเซ็ตข้อมูลเก่า
-    bigPetSlotMap = {}
-    local bigPetsInWorld = {}
-    for uid, petData in pairs(MyBigPets) do
-        table.insert(bigPetsInWorld, petData)
-    end
-    
-    -- เรียงลำดับเพื่อให้ Slot คงที่เสมอ (เช่น เรียงตามชื่อ UID)
-    table.sort(bigPetsInWorld, function(a, b) return a.UID < b.UID end)
-    
-    -- สร้าง UI Labels และ Dropdowns Array เพื่อให้ง่ายต่อการวนลูป
-    local slotLabels = {bigPetSlot1_Label, bigPetSlot2_Label, bigPetSlot3_Label}
-    local slotDropdowns = {Options["BigPetSlot1_Foods"], Options["BigPetSlot2_Foods"], Options["BigPetSlot3_Foods"]}
 
-    -- วนลูปเพื่อกำหนด Slot และอัปเดต UI
-    for i = 1, 3 do
-        local petData = bigPetsInWorld[i]
-        if petData then
-            -- กำหนด Slot ให้กับ Pet
-            bigPetSlotMap[petData.UID] = i
-            
-            -- อัปเดต Label บน UI
-            slotLabels[i]:SetDesc(string.format("Detected: [%s|%s]", petData.Type, petData.Mutate or "None"))
-            
-            -- โหลดการตั้งค่าอาหารของ Slot นี้มาแสดงบน Dropdown
-            local savedFoods = Configuration.Pet.BigPetSlots[i] or {}
-            pcall(function() slotDropdowns[i]:SetValue(savedFoods) end)
-        else
-            -- ไม่มี Pet ใน Slot นี้
-            slotLabels[i]:SetDesc("No Big Pet Detected")
-        end
-    end
-end
--- =================================================================
--- ================== แก้ไขการเชื่อมต่อ Event ของ Big Pet (สลับลำดับฟังก์ชัน) ==================
-
--- 1. สร้างฟังก์ชันสำหรับ Debounce และอัปเดต UI ก่อน
-local function onBigPetListChanged()
-    if bigPetUpdateThread then
-        task.cancel(bigPetUpdateThread)
-        bigPetUpdateThread = nil
-    end
-    bigPetUpdateThread = task.delay(1, function()
-        pcall(updateBigPetSlots)
-        dprint("[UI] อัปเดตรายชื่อ Big Pet และ Slots แล้ว")
-        bigPetUpdateThread = nil
-    end)
-end
-
--- 2. สร้างฟังก์ชันตัวกลางสำหรับกรอง Event ทีหลัง
-local function handlePossibleBigPetChange(petModel)
-    -- ตรวจสอบว่าเป็นสัตว์เลี้ยงของเราหรือไม่
-    if not _isOwnedPetModel(petModel) then return end
-    
-    -- ตรวจสอบว่าเป็น Big Pet หรือไม่
-    local root = petModel.PrimaryPart or petModel:FindFirstChild("RootPart")
-    if root and root:GetAttribute("BigValue") ~= nil then
-        -- ถ้าใช่ทั้งหมด ค่อยเรียกใช้ onBigPetListChanged ที่รู้จักแล้ว
-        onBigPetListChanged()
-    end
-end
-
--- 3. เชื่อมต่อ Event เป็นลำดับสุดท้าย
-table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(handlePossibleBigPetChange))
-table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(handlePossibleBigPetChange))
 
 -- =====================================================================================
 
 -- ฟังก์ชันสำหรับอัปเดตข้อความสถานะบน UI
+
+-- ==== Auto Place Pet • Status Helper ====
+local _APP_last, _APP_lastAt = "", 0
+local function _setPetPlaceStatus(s, force)
+    if not petPlaceParagraph or not petPlaceParagraph.SetDesc then return end
+    -- กันสแปม UI: อัปเดตเมื่อข้อความเปลี่ยนหรือเกิน 0.25s
+    local now = os.clock()
+    if force or s ~= _APP_last or (now - _APP_lastAt) > 0.25 then
+        petPlaceParagraph:SetDesc(s)
+        _APP_last, _APP_lastAt = s, now
+    end
+end
+
 local function setShopStatus(msg)
     shopStatus.lastAction = msg
     if shopParagraph and shopParagraph.SetDesc then
@@ -286,22 +365,25 @@ local function getLockedTiles()
 
     for _, lockModel in ipairs(locksFolder:GetChildren()) do
         local farmPart = lockModel:FindFirstChild("Farm")
+        -- เงื่อนไข: เป็น BasePart และยังล็อกอยู่ (โปร่งใส 0)
         if farmPart and farmPart:IsA("BasePart") and farmPart.Transparency == 0 then
             table.insert(lockedTiles, {
-                model = lockModel,
-                cost = farmPart:GetAttribute("LockCost") or math.huge
+                model    = lockModel,
+                farmPart = farmPart,                                        -- << เพิ่ม
+                cost     = tonumber(farmPart:GetAttribute("LockCost")) or math.huge
             })
         end
     end
     return lockedTiles
 end
 
+
 -- ฟังก์ชันสำหรับยิง RemoteEvent ปลดล็อค Tile
-local function fireUnlockTile(lockModel)
-    local ok = pcall(function()
-        CharacterRE:FireServer("Unlock", lockModel)
+local function fireUnlockTile(lockInfo)
+    if not (lockInfo and lockInfo.farmPart) then return false end
+    return pcall(function()
+        CharacterRE:FireServer("Unlock", lockInfo.farmPart)
     end)
-    return ok
 end
 -- =====================================================================================
 -- ==== Income Cache (drop-in) ====
@@ -416,6 +498,10 @@ end
 local PetHabitatCache = {}
 local ResPetDatabase = require(InGameConfig:WaitForChild("ResPet"))
 
+local function _petTypeByUID(uid)
+    local node = OwnedPetData and OwnedPetData:FindFirstChild(uid)
+    return node and node:GetAttribute("T") or nil
+end
 local function GetPetHabitat(petTypeName)
     if not petTypeName then return "Land" end
     
@@ -456,8 +542,7 @@ end
 --==============================================================
 --  MY PETS (workspace.Pets ของเราเท่านั้น)
 --==============================================================
-local MyPets = {}
-local MyPets_List = {}
+
 
 local function _isOwnedPetModel(model)
     if not (model and model:IsA("Model")) then return false end
@@ -486,22 +571,178 @@ local function _addMyPet(m)
     end
 end
 
-local function _removeMyPet(m)
-    if MyPets[m] then
-        MyPets[m] = nil -- ลบออกจาก Dictionary
+-- ================== โค้ดจัดการ Event สัตว์เลี้ยง (Final Version) ==================
 
-        -- ค้นหาและลบออกจากลิสต์โดยตรง
-        local index = table.find(MyPets_List, m)
+-- 1. ฟังก์ชันลบข้อมูลที่สมบูรณ์ (แทนที่ _removeMyPet ของเก่าทั้งหมด)
+local function _removeMyPet(petModel)
+    if not petModel then return end
+    local petUID = tostring(petModel)
+    
+    -- ลบออกจาก OwnedPets (สำหรับ Auto Collect)
+    if OwnedPets[petUID] then
+        OwnedPets[petUID] = nil
+    end
+
+    -- ลบออกจาก MyPets และ MyPets_List (สำหรับเช็คพื้นที่ว่าง)
+    if MyPets[petModel] then
+        MyPets[petModel] = nil
+        local index = table.find(MyPets_List, petModel)
         if index then
             table.remove(MyPets_List, index)
         end
+    end
+
+    -- (สำคัญที่สุด) ลบออกจาก MyBigPets (สำหรับ Auto Feed และ UI)
+    if MyBigPets[petUID] then
+        MyBigPets[petUID] = nil
+        dprint("[BigPet tracking] Removed:", petUID)
     end
 end
 
 for _,m in ipairs(workspace.Pets:GetChildren()) do _addMyPet(m) end
 workspace.Pets.ChildAdded:Connect(function(m) task.defer(_addMyPet, m) end)
-workspace.Pets.ChildRemoved:Connect(function(m) task.defer(_removeMyPet, m) end)
 
+function getBigPetSlotMapping()
+    local slotMapping = {}
+    
+    -- ดึงตำแหน่งของแท่นวางแต่ละ Slot จาก WorldPivot
+    local islandName = Player:GetAttribute("AssignedIslandName")
+    if not islandName then return {} end
+    
+    local islandModel = workspace.Art:FindFirstChild(islandName)
+    local bigPetFolder = islandModel and islandModel:FindFirstChild("ENV", true) and islandModel.ENV:FindFirstChild("BigPet")
+    if not bigPetFolder then return {} end
+
+    local slotAnchorPositions = {}
+    for i = 1, 3 do
+        local slotAnchor = bigPetFolder:FindFirstChild(tostring(i))
+        local activeModel = slotAnchor and slotAnchor:FindFirstChild("Active")
+        if activeModel and activeModel.WorldPivot then
+            slotAnchorPositions[i] = activeModel.WorldPivot.Position
+        end
+    end
+
+    -- [ส่วนที่แก้ไข] ค้นหา Big Pet โดยเช็กจาก "GUI/BigPetGUI"
+    local myPlacedBigPets = {}
+    local playerUserId = Players.LocalPlayer.UserId
+    for _, petModel in ipairs(workspace.Pets:GetChildren()) do
+        if petModel:GetAttribute("UserId") == playerUserId then
+            local rootPart = petModel.PrimaryPart or petModel:FindFirstChild("RootPart")
+            if rootPart and rootPart:FindFirstChild("GUI/BigPetGUI") then
+                table.insert(myPlacedBigPets, { UID = petModel.Name, Position = petModel:GetPivot().Position })
+            end
+        end
+    end
+
+    -- วนลูปจับคู่ Pet ที่อยู่ใกล้แท่นวางที่สุด
+    for slot, anchorPos in pairs(slotAnchorPositions) do
+        local closestPetUID, closestDistance = nil, math.huge
+        for _, pet in ipairs(myPlacedBigPets) do
+            local petPos2D = Vector2.new(pet.Position.X, pet.Position.Z)
+            local anchorPos2D = Vector2.new(anchorPos.X, anchorPos.Z)
+            local distance = (petPos2D - anchorPos2D).Magnitude
+            if distance < closestDistance then
+                closestDistance = distance
+                closestPetUID = pet.UID
+            end
+        end
+        
+        if closestDistance < 10 then
+            slotMapping[slot] = closestPetUID
+        else
+            slotMapping[slot] = nil
+        end
+    end
+
+    return slotMapping
+end
+-- ================== แก้ไข updateBigPetSlots (Final Version - เพิ่ม Nil Check) ==================
+local function updateBigPetSlots()
+    -- ตรวจสอบว่า UI พร้อมใช้งานหรือไม่
+    if not bigPetSlot1_Label or not bigPetSlot2_Label or not bigPetSlot3_Label or not Options["BigPetSlot1_Foods"] then
+        dprint("[updateBigPetSlots] UI is not fully ready, skipping.")
+        return
+    end
+
+    local Labels = {bigPetSlot1_Label, bigPetSlot2_Label, bigPetSlot3_Label}
+    local Dropdowns = {Options["BigPetSlot1_Foods"], Options["BigPetSlot2_Foods"], Options["BigPetSlot3_Foods"]}
+
+    -- 1. หาตำแหน่งจริงของ Pet ทั้งหมดก่อน
+    -- ผลลัพธ์ที่ได้จะเป็นตารางแบบนี้: { [1]="UID_ของPet", [2]=nil, [3]="UID_ของอีกตัว" }
+    local physicalSlots = getBigPetSlotMapping() 
+
+    -- 2. เคลียร์ข้อมูลเก่า และสร้าง bigPetSlotMap ใหม่ให้ถูกต้องสำหรับ AutoFeed
+    bigPetSlotMap = {} -- ล้างแผนที่เก่า
+    for slot, uid in pairs(physicalSlots) do
+        if uid then
+            -- สร้างแผนที่ใหม่ที่ถูกต้องสำหรับ AutoFeed (UID -> Slot)
+            bigPetSlotMap[uid] = slot
+        end
+    end
+    
+    -- 3. อัปเดต UI ทั้ง 3 Slot ตามข้อมูลตำแหน่งที่ได้มา
+    for i = 1, 3 do
+        local petUID_in_slot = physicalSlots[i] -- ดึง UID ของ Pet ใน Slot ปัจจุบัน
+        
+        if petUID_in_slot and MyBigPets[petUID_in_slot] then
+            -- ถ้ามี Pet อยู่ใน Slot นี้
+            local petData = MyBigPets[petUID_in_slot]
+            Labels[i]:SetDesc(string.format("Detected: [%s|%s]", petData.Type, petData.Mutate or "None"))
+            
+            -- โหลดการตั้งค่าอาหารที่บันทึกไว้สำหรับ Slot นี้
+            local savedFoods = Configuration.Pet.BigPetSlots[i] or {}
+            pcall(function() Dropdowns[i]:SetValue(savedFoods) end)
+        else
+            -- ถ้า Slot นี้ว่าง
+            Labels[i]:SetDesc("No Big Pet Detected")
+            pcall(function() Dropdowns[i]:SetValue({}) end) -- ล้างการเลือกอาหาร
+        end
+    end
+end
+
+-- =================================================================
+-- ================== แก้ไขการเชื่อมต่อ Event ของ Big Pet (สลับลำดับฟังก์ชัน) ==================
+
+-- 1. สร้างฟังก์ชันสำหรับ Debounce และอัปเดต UI ก่อน
+local function onBigPetListChanged()
+    if bigPetUpdateThread then
+        task.cancel(bigPetUpdateThread)
+        bigPetUpdateThread = nil
+    end
+    
+    bigPetUpdateThread = task.delay(1, function()
+        -- รวบรวมรายชื่อ Big Pet ปัจจุบัน
+        local currentBigPetUIDs = {}
+        for uid in pairs(MyBigPets) do
+            table.insert(currentBigPetUIDs, uid)
+        end
+        table.sort(currentBigPetUIDs)
+
+        -- แปลงเป็นสตริงเพื่อเปรียบเทียบ
+        local currentKey = table.concat(currentBigPetUIDs, ",")
+        local lastKey = table.concat(lastKnownBigPetUIDs, ",")
+
+        -- ตรวจสอบว่ามีการเปลี่ยนแปลงจริงหรือไม่
+        if currentKey ~= lastKey then
+            dprint("[UI] Big Pet list has changed. Updating UI.")
+            pcall(updateBigPetSlots)
+            
+            -- อัปเดตรายชื่อล่าสุดที่เรารู้จัก
+            lastKnownBigPetUIDs = currentBigPetUIDs
+        else
+            dprint("[UI] No actual change in Big Pet list. Skipping update.")
+        end
+
+        bigPetUpdateThread = nil
+    end)
+end
+local function handlePossibleBigPetChange_OnAdd(petModel)
+    if not _isOwnedPetModel(petModel) then return end
+    local root = petModel.PrimaryPart or petModel:FindFirstChild("RootPart")
+    if root and root:GetAttribute("BigValue") ~= nil then
+        onBigPetListChanged()
+    end
+end
 
 local function _toggleWhiteOverlay(show)
     local pg = Player:FindFirstChild("PlayerGui")
@@ -648,11 +889,6 @@ for _,egg in pairs(Egg_Belt_Folder:GetChildren()) do
     end)
 end
 
-table.insert(EnvirontmentConnections,Pet_Folder.ChildRemoved:Connect(function(pet)
-    task.wait(0.1)
-    local petUID = tostring(pet) or "None"
-    if pet and OwnedPets[petUID] then OwnedPets[petUID] = nil end
-end))
 
 -- ===== SAFE pet reader (เวอร์ชันเต็มล่าสุด) =====
 local function _buildOwnedPetEntry(pet, petUID)
@@ -1186,92 +1422,111 @@ end
 
 -- ================== แก้ไข runAutoPlacePet (แก้ไข SmartPet Nil Check) ==================
 local function runAutoPlacePet(tok)
-    -- [ขั้นตอนที่ 1] คำนวณครั้งใหญ่: หาสัตว์ที่ต้องวางทั้งหมดและเรียงลำดับ
+    _setPetPlaceStatus("Starting…")
     Fluent:Notify({ Title = "Auto Place Pet", Content = "กำลังรวบรวมและจัดเรียงสัตว์...", Duration = 3 })
-    local uidsToPlace, incMap = __getFilteredInventoryUidsSortedDesc()
 
-    -- กรองสัตว์ตามพื้นที่ที่เลือกใน UI
-    local areaToPlace = Configuration.Pet.PlaceArea or "Any"
-    if areaToPlace ~= "Any" and #uidsToPlace > 0 then
-        local filteredUids = {}
-        dprint(("[AutoPlacePet] กรองสัตว์สำหรับพื้นที่: %s"):format(areaToPlace))
-        for _, uid in ipairs(uidsToPlace) do
-            local petNode = OwnedPetData:FindFirstChild(uid)
-            if petNode then
-                local petTypeName = petNode:GetAttribute("T")
-                if GetPetHabitat(petTypeName) == areaToPlace then
-                    table.insert(filteredUids, uid)
+    while tok.alive do
+        -- 1) ลิสต์ในกระเป๋าที่ “ยังไม่ถูกวาง” เรียง inc มาก→น้อย
+        _setPetPlaceStatus("Scanning inventory…")
+        local uidsToPlace, incMap = __getFilteredInventoryUidsSortedDesc()
+
+        -- กรอง Area ตาม UI
+        local areaToPlace = Configuration.Pet.PlaceArea or "Any"
+        if areaToPlace ~= "Any" and #uidsToPlace > 0 then
+            local filtered = {}
+            for _, uid in ipairs(uidsToPlace) do
+                local t = _petTypeByUID(uid)
+                if t and GetPetHabitat(t) == areaToPlace then
+                    table.insert(filtered, uid)
                 end
             end
+            uidsToPlace = filtered
         end
-        uidsToPlace = filteredUids
-        dprint(("[AutoPlacePet] พบสัตว์ที่ตรงกับพื้นที่ %d ตัว"):format(#uidsToPlace))
-    end
 
-    if #uidsToPlace > 0 then
-        dprint("[AutoPlacePet] พบสัตว์ที่ต้องวาง", #uidsToPlace, "ตัว. เริ่มกระบวนการวาง...")
+        -- ไม่มีสัตว์ให้วาง
+        if #uidsToPlace == 0 then
+            local msg = Configuration.Pet.SmartPet and "SmartPet: ไม่มีสัตว์ในกระเป๋า – หยุด" or "ไม่พบสัตว์ที่ตรงตามเงื่อนไขให้วาง"
+            _setPetPlaceStatus("Stopped: "..msg, true)
+            Fluent:Notify({ Title = "Auto Place Pet", Content = msg, Duration = 4 })
+            pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+            Configuration.Pet.AutoPlacePet = false
+            TaskMgr.stop("AutoPlacePet")
+            return
+        end
 
-        -- [ขั้นตอนที่ 2] ทยอยวางสัตว์จากลิสต์ที่เตรียมไว้
-        for i = 1, #uidsToPlace do
-            if not tok.alive then break end
-            local wasActionTaken = false
-
-            -- SmartPet Pass (ปรับปรุงใหม่ทั้งหมด)
-            if Configuration.Pet.SmartPet then
-                local area = Configuration.Pet.PlaceArea or "Any"
-                local worstUid, worstInc, _, worstTilePart = __findWorstPlacedPetInArea(area)
-                local bestUid = uidsToPlace[i]
-                local bestInc = (bestUid and incMap[bestUid]) or 0
-
-                if worstUid and bestInc > worstInc then
-                    -- หาพื้นที่ของสัตว์ที่แย่ที่สุดอย่างปลอดภัย
-                    local worstPetArea = "Any"
-                    if worstTilePart then
-                        local plotNode = PlotIndex[Grid_keyXZ(worstTilePart.Position.X, worstTilePart.Position.Z)]
-                        if plotNode then
-                            worstPetArea = plotNode.area -- ดึงค่า area จาก plotNode ที่หาเจอ
-                        end
-                    end
-                    
-                    -- เปรียบเทียบพื้นที่ของสัตว์ที่ดีที่สุดกับสัตว์ที่แย่ที่สุด
-                    if GetPetHabitat(bestUid) == worstPetArea then
-                        dprint(("[SmartPet] พบตัวที่ดีกว่าในพื้นที่เดียวกัน! Best: %s (%d) > Worst: %s (%d)"):format(tostring(bestUid), bestInc, tostring(worstUid), worstInc))
-                        local ok, reason = __replacePetAtTile(worstUid, bestUid, worstTilePart)
-                        dprint("[SmartPet] Replace result:", ok, reason)
-                        wasActionTaken = true
-                    end
-                end
+        -- 2) มีที่ว่าง → วาง “ตัวที่ดีที่สุดก่อน” ไม่สน SmartPet
+        local freeList = Grid_FreeList(areaToPlace)
+        if #freeList > 0 then
+            for _, uid in ipairs(uidsToPlace) do
+                if not tok.alive then break end
+                freeList = Grid_FreeList(areaToPlace)
+                if #freeList == 0 then break end
+                local t = _petTypeByUID(uid) or uid
+                local inc = (incMap and incMap[uid]) or GetIncomeFast(uid) or 0
+                _setPetPlaceStatus(("Placing: %s  |  %s/s"):format(tostring(t), tostring(inc)))
+                local dst = Grid_TileCenterPos(freeList[1].part)
+                __placeOnePetToPos(uid, dst)
+                if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
             end
-
-            -- Normal Placement Pass
-            if not wasActionTaken then
-                local currentArea = Configuration.Pet.PlaceArea or "Any"
-                local freeList = Grid_FreeList(currentArea)
-                if #freeList > 0 then
-                    local uidToPlace = uidsToPlace[i]
-                    local tile = freeList[1].part
-                    local dst = Grid_TileCenterPos(tile)
-                    __placeOnePetToPos(uidToPlace, dst)
-                else
-                    if not Configuration.Pet.SmartPet then
-                        Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างแล้ว หยุดการวาง", Duration = 5 })
-                    end
-                    break 
-                end
-            end
+            _setPetPlaceStatus("Re-checking…")
             if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
-        end
-    else
-        Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่พบสัตว์ที่ตรงตามเงื่อนไขให้วาง", Duration = 4 })
-    end
+        else
+            -- 3) ที่ว่างหมด
+            if not Configuration.Pet.SmartPet then
+                _setPetPlaceStatus("Stopped: No free tiles", true)
+                Fluent:Notify({ Title = "Auto Place Pet", Content = "ไม่มีพื้นที่ว่างแล้ว – หยุด", Duration = 4 })
+                pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+                Configuration.Pet.AutoPlacePet = false
+                TaskMgr.stop("AutoPlacePet")
+                return
+            end
 
-    -- ปิดการทำงานอัตโนมัติเมื่อเสร็จสิ้น
-    dprint("[AutoPlacePet] เสร็จสิ้นภารกิจการวางสัตว์, ปิดการทำงานอัตโนมัติ")
-    pcall(function()
-        Options["Auto Place Pet"]:SetValue(false)
-        Configuration.Pet.AutoPlacePet = false
-    end)
-    TaskMgr.stop("AutoPlacePet")
+            -- SmartPet: พยายามแทนที่
+            local worstUid, worstInc, _, worstTilePart = __findWorstPlacedPetInArea(areaToPlace)
+            worstInc = tonumber(worstInc) or 0
+            if not worstUid then
+                _setPetPlaceStatus("SmartPet: ไม่พบเป้าหมายแทนที่ – หยุด", true)
+                Fluent:Notify({ Title = "Auto Place Pet", Content = "SmartPet: ไม่พบเป้าหมายสำหรับแทนที่ – หยุด", Duration = 4 })
+                pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+                Configuration.Pet.AutoPlacePet = false
+                TaskMgr.stop("AutoPlacePet")
+                return
+            end
+
+            local worstArea = "Any"
+            if worstTilePart then
+                local node = PlotIndex[_keyXZ(worstTilePart.Position.X, worstTilePart.Position.Z)]
+                worstArea = node and node.area or "Any"
+            end
+
+            local candidateUid, candidateInc, candidateType = nil, 0, nil
+            for _, uid in ipairs(uidsToPlace) do
+                local t = _petTypeByUID(uid)
+                local a = t and GetPetHabitat(t) or "Any"
+                if (areaToPlace == "Any" or a == areaToPlace) and (worstArea == "Any" or a == worstArea) then
+                    local inc = (incMap and incMap[uid]) or GetIncomeFast(uid) or 0
+                    if inc > worstInc and inc > candidateInc then
+                        candidateUid, candidateInc, candidateType = uid, inc, t
+                    end
+                end
+            end
+
+            if candidateUid then
+                _setPetPlaceStatus(("Replacing: %s (%d/s)  ←  %s (%d/s)")
+                    :format(tostring(candidateType or candidateUid), candidateInc, tostring(worstUid), worstInc))
+                local ok, reason = __replacePetAtTile(worstUid, candidateUid, worstTilePart)
+                dprint("[SmartPet] Replace:", ok, reason, "best=", candidateInc, "worst=", worstInc, "area=", worstArea)
+                if not _waitAlive(tok, tonumber(Configuration.Pet.AutoPlacePet_Delay) or 1) then break end
+            else
+                _setPetPlaceStatus("SmartPet: ไม่มีสัตว์ที่ดีกว่าแล้ว – หยุด", true)
+                Fluent:Notify({ Title = "Auto Place Pet", Content = "SmartPet: ไม่มีสัตว์ที่ดีกว่าแล้ว – หยุด", Duration = 4 })
+                pcall(function() Options["Auto Place Pet"]:SetValue(false) end)
+                Configuration.Pet.AutoPlacePet = false
+                TaskMgr.stop("AutoPlacePet")
+                return
+            end
+        end
+    end
 end
 --================================================================================
 
@@ -1373,34 +1628,46 @@ local function runAutoUpgradeConveyor(tok)
 end
 
 local function runAutoUnlockTiles(tok)
+    setShopStatus("Auto Unlock Tiles: running")
+
     while tok.alive do
         local lockedTiles = getLockedTiles()
         local cash = getPlayerCash()
-        local unlockedSomething = false
+        local didSomething = false
 
-        if #lockedTiles > 0 then
-            -- เรียงลำดับอันที่ถูกที่สุดก่อน
-            table.sort(lockedTiles, function(a, b) return a.cost < b.cost end)
-            
-            for _, tileInfo in ipairs(lockedTiles) do
-                if cash >= tileInfo.cost then
-                    setShopStatus(string.format("Unlocking %s...", tileInfo.model.Name))
-                    if fireUnlockTile(tileInfo.model) then
-                        unlockedSomething = true
-                        cash = cash - tileInfo.cost -- อัปเดตเงินจำลองเพื่อซื้ออันต่อไปได้ทันที
-                        task.wait(1) -- รอหลังปลดล็อค
-                    end
-                end
+        -- เรียงจากถูกไปแพง
+        table.sort(lockedTiles, function(a, b) return (a.cost or math.huge) < (b.cost or math.huge) end)
+
+        for _, tileInfo in ipairs(lockedTiles) do
+            if not tok.alive then break end                 -- <<< ยกเลิกทันทีเมื่อกดปิด
+            if cash < (tileInfo.cost or math.huge) then break end
+
+            setShopStatus(("Unlocking %s (%d)…"):format(tileInfo.model.Name, tileInfo.cost or 0))
+
+            local ok = fireUnlockTile(tileInfo)              -- ใช้เวอร์ชันใหม่ที่ส่ง farmPart
+            if ok then
+                didSomething = true
+                cash = cash - (tileInfo.cost or 0)
             end
+
+            -- ให้โอกาสตรวจจับการปิดและไม่ลูปยาวเกิน
+            if not _waitAlive(tok, 0.2) then break end       -- <<< จุดยกเลิกเร็ว
         end
-        
-        if not unlockedSomething then
-            setShopStatus("Waiting for money for next tile...", shopStatus)
-            if not _waitAlive(tok, 2) then break end
+
+        if not tok.alive then break end
+
+        if not didSomething then
+            setShopStatus("Waiting for money for next tile…")
+            if not _waitAlive(tok, 1.0) then break end       -- <<< จุดยกเลิกเร็ว
+        else
+            -- เพิ่งปลดไปอย่างน้อย 1 แผ่น ลองสแกนใหม่ทันที (เผื่อมีแผ่นราคาถูกชิ้นถัดไป)
+            if not _waitAlive(tok, 0.2) then break end
         end
     end
-    setShopStatus("Stopped.", shopStatus)
+
+    setShopStatus("Stopped.")
 end
+
 -- ========================================================================================
 local function runAntiAFK(tok)
     local VirtualUser = game:GetService("VirtualUser")
@@ -1516,7 +1783,93 @@ local function runAutoFeed(tok)
     end
 end
 -- =====================================================================
+-- ================== runSmartFeed  ==================
 
+local function runSmartFeed(tok)
+    while tok.alive do
+        dprint("[SmartFeed] เริ่มรอบการตรวจสอบใหม่...")
+
+        -- [ส่วนที่แก้ไข!] รอจนกว่าสคริปต์หลักจะหา Big Pet และสร้าง Slot Map เสร็จ
+        if not next(MyBigPets) or not next(bigPetSlotMap) then
+            dprint("[SmartFeed] กำลังรอข้อมูล Big Pet จากสคริปต์หลัก...")
+            if not _waitAlive(tok, 3) then break end
+        else
+            -- เมื่อข้อมูลพร้อมแล้ว ให้ทำงานตามปกติ
+            
+            -- [แก้ไข] สร้างตาราง Slot > UID เพื่อให้ใช้งานง่ายขึ้น
+            local currentPetSlots = {}
+            for uid, slot in pairs(bigPetSlotMap) do
+                currentPetSlots[slot] = uid
+            end
+            
+            local invAttrs = (InventoryData and InventoryData:GetAttributes()) or {}
+            
+            -- === ตรวจสอบสัตว์บก (Slot 1, 2) ===
+            if openBigPetUIForSlot(1) then
+                task.wait(1.5)
+                for _, config in ipairs(SmartFeedConfig) do
+                    if config.UnlockType == "PET" and table.find(config.Slots, 1) then
+                        local targets_to_check = (type(config.UnlockTarget) == "table") and config.UnlockTarget or {config.UnlockTarget}
+                        for _, petName in ipairs(targets_to_check) do
+                            if (invAttrs[config.Fruit] or 0) > 0 and not isBigPetUnlocked(petName) then
+                                -- วนหา Pet ใน Slot บก ที่ไม่ติด Cooldown จาก currentPetSlots
+                                local petInSlot1 = currentPetSlots[1]
+                                local petInSlot2 = currentPetSlots[2]
+                                if petInSlot1 and feedFruitToPet(config.Fruit, petInSlot1) then
+                                    task.wait(1)
+                                elseif petInSlot2 and feedFruitToPet(config.Fruit, petInSlot2) then
+                                    task.wait(1)
+                                end
+                                break 
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- === ตรวจสอบสัตว์น้ำ (Slot 3) ===
+            if openBigPetUIForSlot(3) then
+                task.wait(1.5)
+                for _, config in ipairs(SmartFeedConfig) do
+                    if config.UnlockType == "PET" and table.find(config.Slots, 3) then
+                        local targets_to_check = (type(config.UnlockTarget) == "table") and config.UnlockTarget or {config.UnlockTarget}
+                        for _, petName in ipairs(targets_to_check) do
+                            if (invAttrs[config.Fruit] or 0) > 0 and not isBigPetUnlocked(petName) then
+                                local petInSlot3 = currentPetSlots[3]
+                                if petInSlot3 and feedFruitToPet(config.Fruit, petInSlot3) then
+                                    task.wait(1)
+                                end
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+            
+            -- === ตรวจสอบ Mutation ===
+            for _, config in ipairs(SmartFeedConfig) do
+                if config.UnlockType == "MUTATION" then
+                    if (invAttrs[config.Fruit] or 0) > 0 and not isMutationUnlocked(config.UnlockTarget) then
+                        -- วนหา Pet ตัวไหนก็ได้ที่ไม่ติด Cooldown
+                        for slot, uid in pairs(currentPetSlots) do
+                            if uid and feedFruitToPet(config.Fruit, uid) then
+                                task.wait(1); break
+                            end
+                        end
+                    end
+                end
+            end
+
+            local screenGui = Players.LocalPlayer.PlayerGui:FindFirstChild("ScreenBigPetSwitch")
+            if screenGui then screenGui.Enabled = false end
+
+            dprint(("[SmartFeed] ตรวจสอบครบรอบแล้ว, รอ %d วินาที..."):format(Configuration.Pet.SmartFeed_Delay))
+            if not _waitAlive(tok, tonumber(Configuration.Pet.SmartFeed_Delay) or 15) then break end
+        end
+    end
+end
+
+-- =====================================================================
 local function runAutoCollectPet(tok)
     local function passArea(uid)
         local want = Configuration.Pet.CollectPet_Area or "Any"
@@ -1700,7 +2053,7 @@ Tabs.Main:AddToggle("AutoCollect",{ Title="Auto Collect", Default=false, Callbac
 end })
 -- สร้าง Paragraph สำหรับแสดงสถานะ
 shopParagraph = Tabs.Main:AddParagraph({
-    Title = "Conveyor Status",
+    Title = "Upgrade Status",
     Content = "Upgrades: 0 done\nLast: Inactive"
 })
 
@@ -1715,12 +2068,17 @@ Tabs.Main:AddToggle("AutoUpgradeConveyor",{
     end 
 })
 Tabs.Main:AddToggle("AutoUnlockTiles",{ 
-    Title="Auto Unlock Tiles", 
-    Default=false, 
-    Callback=function(v)
+    Title = "Auto Unlock Tiles", 
+    Default = false, 
+    Callback = function(v)
         Configuration.Main.AutoUnlockTiles = v
-        if v then TaskMgr.start("AutoUnlockTiles", runAutoUnlockTiles)
-        else TaskMgr.stop("AutoUnlockTiles") end
+        if v then
+            setShopStatus("Starting…")
+            TaskMgr.start("AutoUnlockTiles", runAutoUnlockTiles)
+        else
+            TaskMgr.stop("AutoUnlockTiles")
+            setShopStatus("Stopped.")
+        end
     end 
 })
 Tabs.Main:AddSection("Settings")
@@ -1753,17 +2111,34 @@ Tabs.Pet:AddToggle("Auto Feed",{ Title="Auto Feed", Default=false, Callback=func
     Configuration.Pet.AutoFeed = v
     if v then TaskMgr.start("AutoFeed", runAutoFeed) else TaskMgr.stop("AutoFeed") end
 end })
+-- ในส่วน UI ของแท็บ Pet
+Tabs.Pet:AddToggle("SmartFeed",{ Title="Smart Feed (Unlock Only)", Default=false, Callback=function(v)
+    Configuration.Pet.SmartFeed = v
+    if v then TaskMgr.start("SmartFeed", runSmartFeed) else TaskMgr.stop("SmartFeed") end
+end })
+Tabs.Pet:AddSlider("SmartFeed Delay",{ Title = "SmartFeed Delay", Default = 15, Min = 10, Max = 60, Rounding = 0, Callback = function(v) Configuration.Pet.SmartFeed_Delay = v end })
+
 Tabs.Pet:AddToggle("Auto Collect Pet",{ Title="Auto Collect Pet", Default=false, Callback=function(v)
     Configuration.Pet.CollectPet_Auto = v
     if v then TaskMgr.start("AutoCollectPet", runAutoCollectPet) else TaskMgr.stop("AutoCollectPet") end
 end })
 
+
+petPlaceParagraph = Tabs.Pet:AddParagraph({
+    Title = "Auto Place Pet Status",
+    Content = "Inactive"
+})
 Tabs.Pet:AddToggle("Auto Place Pet",{
     Title="Auto Place Pet", Default=false,
     Callback=function(v)
         Configuration.Pet.AutoPlacePet = v
-        if v then TaskMgr.start("AutoPlacePet", runAutoPlacePet)
-        else TaskMgr.stop("AutoPlacePet") end
+        if v then
+            _setPetPlaceStatus("Starting…", true)
+            TaskMgr.start("AutoPlacePet", runAutoPlacePet)
+        else
+            _setPetPlaceStatus("Inactive", true)
+            TaskMgr.stop("AutoPlacePet")
+        end
     end
 })
 
@@ -1935,6 +2310,10 @@ Tabs.Egg:AddToggle("Auto Egg",{ Title="Auto Buy Egg", Default=false, Callback=fu
     Configuration.Egg.AutoBuyEgg = v
     if v then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) else TaskMgr.stop("AutoBuyEgg") end
 end })
+eggPlaceParagraph = Tabs.Egg:AddParagraph({
+    Title = "Auto Place Egg Status",
+    Content = "Inactive"
+})
 Tabs.Egg:AddToggle("Auto Place Egg",{
     Title="Auto Place Egg", Default=false,
     Callback=function(v)
@@ -2602,40 +2981,46 @@ end)
 -- ================== END UX/UI (Simplified) =====================
 -----------------------------------------------------------------
 
-
 Window:SelectTab(Home)
 Fluent:Notify({ Title = "Fluent", Content = "The script has been loaded.", Duration = 8 })
 Perf_Set3DEnabled(not (Configuration.Perf.Disable3D == true))
 
 SaveManager:LoadAutoloadConfig()
 updateBigPetSlots()
-if Configuration.Perf.FPSLock or (getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.locked) then
-    if getgenv().MEOWY_FPS and getgenv().MEOWY_FPS.cap then
-        Configuration.Perf.FPSValue = getgenv().MEOWY_FPS.cap
-    end
-    ApplyFPSLock()
-end
-
 getgenv().MeowyBuildAZoo = Window
 
 --==============================================================
---              AUTO-START AFTER LOADAUTOCONFIG
+--              EVENT CONNECTIONS (MOVED TO END)
 --==============================================================
-local function _autostart()
-    if Configuration.AntiAFK then TaskMgr.start("AntiAFK", runAntiAFK) end
-    if Configuration.Main.AutoCollect then TaskMgr.start("AutoCollect", runAutoCollect) end
-    if Configuration.Pet.AutoFeed then TaskMgr.start("AutoFeed", runAutoFeed) end
-    if Configuration.Pet.CollectPet_Auto then TaskMgr.start("AutoCollectPet", runAutoCollectPet) end
-    if Configuration.Pet.AutoPlacePet then TaskMgr.start("AutoPlacePet", runAutoPlacePet) end
-    if Configuration.Egg.AutoHatch then TaskMgr.start("AutoHatch", runAutoHatch) end
-    if Configuration.Egg.AutoBuyEgg then TaskMgr.start("AutoBuyEgg", runAutoBuyEgg) end
-    if Configuration.Egg.AutoPlaceEgg then TaskMgr.start("AutoPlaceEgg", runAutoPlaceEgg) end
-    if Configuration.Shop.Food.AutoBuy then TaskMgr.start("AutoBuyFood", runAutoBuyFood) end
-    if Configuration.Event.AutoClaim then TaskMgr.start("AutoClaim", runAutoClaim) end
-    if Configuration.Event.AutoLottery then TaskMgr.start("AutoLottery", runAutoLottery) end
-end
-_autostart()
+table.insert(EnvirontmentConnections, Pet_Folder.ChildAdded:Connect(function(pet)
+    task.defer(function()
+        -- 1. ตรวจสอบก่อนว่าเป็นสัตว์เลี้ยงของเราหรือไม่ ถ้าไม่ใช่ ให้หยุดทันที
+        if not _isOwnedPetModel(pet) then return end
+        
+        -- ถ้าใช่ ถึงจะทำงานส่วนที่เหลือ
+        _addMyPet(pet)
+        _buildOwnedPetEntry(pet, tostring(pet))
+        handlePossibleBigPetChange_OnAdd(pet) 
+    end)
+end))
 
+table.insert(EnvirontmentConnections, Pet_Folder.ChildRemoved:Connect(function(pet)
+    task.defer(function()
+        -- 1. ตรวจสอบว่าใช่สัตว์เลี้ยงที่เราเคยบันทึกไว้หรือไม่ ถ้าไม่ใช่ ให้หยุดทันที
+        -- (วิธีนี้ปลอดภัยที่สุดสำหรับตอนลบ เพราะ pet อาจถูกทำลายไปบางส่วน)
+        if not MyPets[pet] then return end
+
+        -- ถ้าใช่ ถึงจะทำงานส่วนที่เหลือ
+        local petUID = tostring(pet)
+        local wasBigPet = MyBigPets[petUID] ~= nil 
+        
+        _removeMyPet(pet)
+        
+        if wasBigPet then
+            onBigPetListChanged()
+        end
+    end)
+end))
 --==============================================================
 --                        CLEANUP
 --==============================================================
